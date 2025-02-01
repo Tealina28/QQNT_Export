@@ -96,10 +96,11 @@ def decode(path):
             time_stamp = row[13]  # 提取 time_stamp
             try:
                 messages = get_message_from_raw(data)
-                formatted_message = get_message_from_single(messages, interlocutor_num, sender_num, time_stamp)
+                formatted_messages = get_message_from_single(messages, interlocutor_num, sender_num, time_stamp)
                 if interlocutor_num not in interlocutor_messages:
                     interlocutor_messages[interlocutor_num] = []
-                interlocutor_messages[interlocutor_num].append((time_stamp, formatted_message))  # 修改：存储时间戳和格式化消息
+                for formatted_message in formatted_messages:
+                    interlocutor_messages[interlocutor_num].append(formatted_message)
             except Exception as e:
                 print(f"处理消息时出错: {e}")
 
@@ -109,10 +110,10 @@ def decode(path):
             sorted_messages = sorted(messages, key=lambda x: x[0])  # 修改：使用时间戳排序
             try:
                 with open(os.path.join(output_dir, f"{interlocutor_num}.txt"), "a", encoding="utf-8") as interlocutor_file:
-                    for time, message in sorted_messages:
+                    for time_stamp,direction, message in sorted_messages:
                         # 将时间戳转换为可读时间并格式化输出
-                        readable_time = datetime.fromtimestamp(time).strftime('%Y-%m-%d %H:%M:%S')
-                        interlocutor_file.write(f"{readable_time}-{message}\n")
+                        readable_time = datetime.fromtimestamp(time_stamp).strftime('%Y-%m-%d %H:%M:%S')
+                        interlocutor_file.write(f"{readable_time}-{direction}-{message}\n")
             except IOError as e:
                 print(f"写入文件时出错: {e}")
 
@@ -148,7 +149,7 @@ def get_message_from_single(messages, interlocutor_num, sender_num, time_stamp):
             formatted_messages.append((time_stamp, direction, message_content))  # 将格式化字符串添加到列表中
 
         # 返回所有消息的格式化字符串，用换行符分隔
-        return "\n".join(f"{direction}-{content}" for _, direction, content in formatted_messages)
+        return formatted_messages
 
     except Exception as e:
         print(f"解析消息时出错: {e}")
