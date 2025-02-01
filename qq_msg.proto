@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+message Message { repeated SingleMessage messages = 40800; }
+
+message SingleMessage {
+  uint64 messageId = 45001;
+  uint32 messageType = 45002;
+  // 1：文字，2：图片，3：文件，6：表情，7：回复，
+  // 8：提示消息（中间灰色），10：应用消息
+  // 21：语音消息（电话）
+  // 26：动态消息
+
+  // 回复消息
+  string senderId = 40020;
+  string receiverId = 40021;
+
+  // 文字消息
+  string messageText = 45101;
+
+  // 文件消息
+  string fileName = 45402;
+  uint64 fileSize = 45405;
+
+  uint64 sendTimestampFile = 45505; // ?
+
+  // 图片消息
+  string imageUrlLow = 45802;
+  string imageUrlHigh = 45803;
+  string imageUrlOrigin = 45804;
+  string imageText = 45815;
+
+  uint32 senderUid = 47403;
+  uint32 sendTimestamp = 47404;
+  uint32 receiverUid = 47411;
+  SingleMessage replyMessage = 47423;
+
+  // 表情消息
+  // 1: QQ 系统表情，2: emoji 表情
+  // https://bot.q.qq.com/wiki/develop/api/openapi/emoji/model.html
+  uint32 emojiId = 47601;
+  string emojiText = 47602;
+
+  // 应用消息
+  string applicationMessage = 47901;
+
+  // 语音消息
+  string callStatusText = 48153;
+  string callText = 48157;
+
+  // 动态消息
+  FeedMessage feedTitle = 48175;
+  FeedMessage feedContent = 48176;
+
+  string feedUrl = 48180;
+  string feedLogoUrl = 48181;
+  uint32 feedPublisherUid = 48182;
+
+  string feedJumpInfo = 48183;
+  string feedPublisherId = 48188;
+
+  // 提示消息
+  string noticeInfo = 48214;
+  string noticeInfo2 = 48271; // ?
+}
+
+message FeedMessage { string text = 48178; }
