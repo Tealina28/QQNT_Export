@@ -5,11 +5,11 @@ from json import loads, JSONDecodeError
 import os
 from re import search, findall
 
-def get_message_from_raw(interlocutor_num, sender_num, time_stamp, raw):
+def get_message_from_raw(raw):
     """解析原始消息数据"""
     messages = qq_msg_pb2.Message()
     messages.ParseFromString(raw)
-    return messages, interlocutor_num, sender_num, time_stamp
+    return messages
 
 def extract_txt(data):
     """解析提示消息的文本"""
@@ -95,7 +95,7 @@ def decode(path):
             sender_num = row[32]  # 提取 sender_num
             time_stamp = row[13]  # 提取 time_stamp
             try:
-                messages, interlocutor_num, sender_num, time_stamp = get_message_from_raw(interlocutor_num, sender_num, time_stamp, data)
+                messages = get_message_from_raw(data)
                 formatted_message = get_message_from_single(messages, interlocutor_num, sender_num, time_stamp)
                 if interlocutor_num not in interlocutor_messages:
                     interlocutor_messages[interlocutor_num] = []
@@ -142,14 +142,10 @@ def get_message_from_single(messages, interlocutor_num, sender_num, time_stamp):
             message_type = message.messageType
             message_content = message_type_handlers.get(message_type, lambda _: "[未知消息类型]")(message)
 
-            # 提取 interlocutorNum, senderNum, timeStamp
             direction = "收" if interlocutor_num == sender_num else "发"
 
             # 将提取的信息与消息内容一起存储在列表中
             formatted_messages.append((time_stamp, direction, message_content))  # 将格式化字符串添加到列表中
-
-        # 按时间戳排序
-        formatted_messages.sort(key=lambda x: x[0])
 
         # 返回所有消息的格式化字符串，用换行符分隔
         return "\n".join(f"{direction}-{content}" for _, direction, content in formatted_messages)
