@@ -109,6 +109,22 @@ def write_to_file(sorted_interlocutor_messages, output_dir):
                 file.write(f"{readable_time} {sender_num}: {context}\n")
 
 
+def get_num_from_mapping(c2, index, uid, default_value):
+    if uid in index:
+        return index[uid]
+
+    if uid:
+        try:
+            result = c2.execute('SELECT "1002" FROM nt_uid_mapping_table WHERE "48902" = ?', (uid,)).fetchone()
+            if result:
+                num = result[0]
+                index[uid] = num
+                return num
+        except Exception as e:
+            print(f"Database query failed for UID {uid}: {e}")
+            return default_value
+    return default_value
+
 def decode_c2c(path):
     """
     主函数，负责解码数据库中的私聊消息并输出到文件
@@ -124,24 +140,30 @@ def decode_c2c(path):
 
     try:
         conn = sqlite3.connect(os.path.join(path, "nt_msg.db"))
-        c = conn.cursor()
-        cursor = c.execute("SELECT * FROM c2c_msg_table")
+        c1 = conn.cursor()
+        c2 = conn.cursor()
+        c2c = c1.execute("SELECT * FROM c2c_msg_table")
         print("数据库连接成功")
 
         interlocutor_messages = {}
+        mapping = {}
         print("正在读取数据库，请稍等...")
-        for row in cursor:
+        for row in c2c:
             if row[17] is None:
                 continue
             time_stamp = row[13]
             raw = row[17]
-            interlocutor_num = row[31]
-            sender_num = row[32]
+            sender_uid = row[8]
+            interlocutor_uid = row[9]
+
+            interlocutor_num = get_num_from_mapping(c2, mapping, interlocutor_uid, row[31])
+            sender_num = get_num_from_mapping(c2, mapping, sender_uid, row[32])
 
             contents = get_content(raw)
 
             if interlocutor_num not in interlocutor_messages:
                 interlocutor_messages[interlocutor_num] = []
+
             direction = "收" if sender_num == interlocutor_num else "发"
             for content in contents:
                 interlocutor_messages[interlocutor_num].append((time_stamp, direction, content))
@@ -160,4 +182,4 @@ def decode_c2c(path):
 
 
 if __name__ == "__main__":
-    decode_c2c(path)
+    decode_c2c("E:/QEData/decrypt_1738471602")
