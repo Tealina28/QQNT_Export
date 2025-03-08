@@ -2,15 +2,15 @@
 
 ## 介绍
 
-本项目用于解密并读取QQNT数据库中的聊天记录。
+本项目用于读取并导出**解密后的**QQNT数据库中的聊天记录。
 
-⚠目前仅能解密QQNT（Android）数据库。
+解密数据库请使用[qqnt_backup](https://github.com/xCipHanD/qqnt_backup)（Android）或参照[qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)。
 
-由于作者对SQL和Protobuf一窍不通，所以代码水平较差，需要合作者。
+由于作者对SQL和Protobuf一窍不通，所以代码水平较差，寻求合作者。
 
 ## 使用流程
 
-存在两种使用方式
+有两种使用方式
 
 1. 使用二进制文件（Windows）。
 
@@ -24,48 +24,24 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 
 1. 克隆或下载本仓库。
 
-2. 确保你拥有[Python 3.12.8](https://www.python.org/downloads/release/python-3128/)或近似的Python版本（仅限Python3.11和Python3.12）。
+2. 确保你拥有[Python 3](https://www.python.org/downloads/)环境，建议使用较新的版本。
 
 3. 使用`pip install -r requirements.txt`安装项目依赖。
 
 ### 使用
 
-#### 解密
-
-`path`指数据库目录路径，如`X:/nt_qq_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`。
-
-`uid`的获取方法见于[qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)。
-
-在仓库根目录打开命令行，运行
+`path`指**解密后的**数据库目录路径。
 
 ```bash
-python main.py decrypt [path] [uid]
+python main.py [path]
 ```
 
 或
 
 ```bash
-[二进制文件名] decrypt [path] [uid]
+[二进制文件名] [path]
 ```
-
-若一切正常，你应该看到在`path`的上级目录生成了解密后的的数据库目录。
-
-#### 读取
-
-`path`指解密后的的数据库目录路径。
-
-```bash
-python main.py decode [path]
-```
-
-或
-
-```bash
-[二进制文件名] decode [path]
-```
-若一切正常，你应该看到在`path`的上级目录生成了`outputs`目录，目录中对于每个私聊对象生成了一个`.txt`文件（不知道`0.txt`是怎么回事）。
-
-
+若一切正常，你应该看到在`path`的上级目录生成了`outputs/c2c`目录，目录中对于每个私聊对象生成了一个`.txt`文件（不知道`0.txt和None.txt`是怎么回事）。
 
 ## 关于
 
@@ -73,9 +49,12 @@ python main.py decode [path]
 
 ## 鸣谢
 
-解密部分代码来自[qqnt_backup](https://github.com/xCipHanD/qqnt_backup)。
 
-读取部分代码基础来自[qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)和[@yllhwa](https://github.com/yllhwa)
+| 对象                                       | 内容                          |
+|------------------------------------------|-----------------------------|
+| [@yllhwa](https://github.com/yllhwa)     | 初始代码和Protobuf定义             |
+| [@shenapex](https://github.com/shenapex) | 数据表部分列含义，Protobuf的消息段部分字段含义 |
+| [QQDecrypt](https://qq.sbcnm.top/)       | 数据表部分列含义，Protobuf的消息段部分字段含义 |
 
 ## 免责声明
 
