@@ -1,38 +1,44 @@
 syntax = "proto3";
 
-message Message { repeated SingleMessage messages = 40800; }
+message Sections { repeated Section sections = 40800; }
 
-message SingleMessage {
-  uint64 messageId = 45001;
-  uint32 messageType = 45002;
-  // 1：文字，2：图片，3：文件，6：表情，7：回复，
+message Section {
+  uint64 id = 45001;
+  uint32 type = 45002;
+  // 1：文本段，2：图片段，3：文件消息，6：表情段，7：引用段，
   // 8：提示消息（中间灰色），10：应用消息
-  // 21：语音消息（电话）
+  // 21：通话段
   // 26：动态消息
 
-  // 回复消息
-  string senderId = 40020;
-  string receiverId = 40021;
+  // 引用
+  string senderUid = 40020;
+  string interlocutorUid = 40021;
 
-  // 文字消息
-  string messageText = 45101;
+  uint32 senderUin = 47403;
+  uint32 quotedTimestamp = 47404;
+  uint32 interlocutorUin = 47411;
 
-  // 文件消息
-  string fileName = 45402;
+  Section quotedSection = 47423;
+
+  // 文字
+  string text = 45101;
+
+  // 文件
+  string fileName = 45402; // imageFileName2
   uint64 fileSize = 45405;
 
-  uint64 sendTimestampFile = 45505; // ?
+  uint64 fileTimestamp = 45505; // ?
 
-  // 图片消息
+  // 图片
+  string imageFileName = 45102;
+
   string imageUrlLow = 45802;
   string imageUrlHigh = 45803;
   string imageUrlOrigin = 45804;
-  string imageText = 45815;
 
-  uint32 senderUid = 47403;
-  uint32 sendTimestamp = 47404;
-  uint32 receiverUid = 47411;
-  SingleMessage replyMessage = 47423;
+  string imageFilePath = 45812;
+
+  string imageText = 45815;
 
   // 表情消息
   // 1: QQ 系统表情，2: emoji 表情
@@ -43,8 +49,8 @@ message SingleMessage {
   // 应用消息
   string applicationMessage = 47901;
 
-  // 语音消息
-  string callStatusText = 48153;
+  // 通话消息
+  string callStatus = 48153;
   string callText = 48157;
 
   // 动态消息
@@ -53,10 +59,10 @@ message SingleMessage {
 
   string feedUrl = 48180;
   string feedLogoUrl = 48181;
-  uint32 feedPublisherUid = 48182;
+  uint32 feedPublisherUin = 48182;
 
   string feedJumpInfo = 48183;
-  string feedPublisherId = 48188;
+  string feedPublisherUid = 48188;
 
   // 提示消息
   string noticeInfo = 48214;
