@@ -2,13 +2,13 @@ from datetime import datetime
 from json import loads, JSONDecodeError
 from re import search, findall
 
-import c2c_sections_pb2
+import sections_pb2
 
 class Message:
 
     def __init__(self,time_stamp,raw,sender_uin,interlocutor_uin):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
-        self.sections = c2c_sections_pb2.Sections()
+        self.sections = sections_pb2.Sections()
         self.sections.ParseFromString(raw)
         self.sender_uin = sender_uin
         self.interlocutor_uin = interlocutor_uin
