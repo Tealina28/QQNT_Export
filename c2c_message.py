@@ -110,14 +110,14 @@ class Message:
         return content,output
 
     def application_content(self,section):
-        content = section.applicationMessage
-        # print(content)
-        result = search(r"'desc':'(.*?)'",content)
-        if result:
-            output = f"[应用消息]{result.group(1)}" # 此为权宜之计，有待后续改进
-        else:
-            output = "[应用消息]"
+        raw = section.applicationMessage
+
+        content = loads(raw)["prompt"]
+        # 此为权宜之计，有待后续改进
+        output = f"[应用消息]{content}"
+
         return content,output
+
 
     def call_content(self,section):
         status = section.callStatus
