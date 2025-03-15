@@ -88,7 +88,6 @@ class Message:
         info = section.noticeInfo
         info2 = section.noticeInfo2
 
-        content = ""
         if info:
             root = fromstring(info)
             texts = [
@@ -102,6 +101,7 @@ class Message:
             info2 = info2.replace(r"\/","/")
             info2_dict = literal_eval(info2)
 
+            content = ""
             for item in info2_dict["items"]:
                 content += item.get("txt","")
 
