@@ -1,7 +1,6 @@
 from ast import literal_eval
 from datetime import datetime
-from json import loads, JSONDecodeError
-from re import search, findall
+from json import loads
 from xml.etree.ElementTree import fromstring
 
 import sections_pb2
@@ -88,6 +87,9 @@ class Message:
         info = section.noticeInfo
         info2 = section.noticeInfo2
 
+        if not info and not info2:
+            return None,"[提示消息]"
+
         if info:
             root = fromstring(info)
             texts = [
@@ -95,25 +97,25 @@ class Message:
                 for elem in root.findall('.//nor')
                 if elem.get('txt')
             ]
-            content = ' '.join(texts)
 
         if info2:
             info2 = info2.replace(r"\/","/")
             info2_dict = literal_eval(info2)
 
-            content = ""
-            for item in info2_dict["items"]:
-                content += item.get("txt","")
+            texts = [item.get("txt","")
+                     for item
+                     in info2_dict["items"]]
 
         # 此为权宜之计，有待后续改进
+        content = " ".join(texts)
         output = f"[提示消息]{content}"
+
         return content,output
 
     def application_content(self,section):
         raw = section.applicationMessage
 
         content = loads(raw)["prompt"]
-        # 此为权宜之计，有待后续改进
         output = f"[应用消息]{content}"
 
         return content,output
