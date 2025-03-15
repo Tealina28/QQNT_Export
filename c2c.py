@@ -22,28 +22,28 @@ def c2c(path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    print("正在加载uid索引")
+    print("正在加载uin索引")
     mapping = load_mapping(cursor)
 
     all_messages = {}
     print("正在读取消息")
     for row in cursor.execute('SELECT "40020","40021","40050","40800","40030","40033" FROM c2c_msg_table ORDER BY "40050"'): # 后续改为仅读取需要的列
-        sender_uin = mapping.get(row[0],row[5])
-        interlocutor_uin = mapping.get(row[1],row[4])
-        # 这么做是因为uid或uin有时为空，但同时为空的情况较少
+        sender_num = mapping.get(row[0],row[5])
+        interlocutor_num = mapping.get(row[1],row[4])
+        # 这么做是因为num或uin有时为空，但同时为空的情况较少
         if row[3]:
-            message = Message(row[2],row[3],sender_uin,interlocutor_uin)
+            message = Message(row[2],row[3],sender_num,interlocutor_num)
             message.parse()
         else:
             continue
 
-        if interlocutor_uin not in all_messages:
-            all_messages[interlocutor_uin] = []
-        all_messages[interlocutor_uin].append(message)
+        if interlocutor_num not in all_messages:
+            all_messages[interlocutor_num] = []
+        all_messages[interlocutor_num].append(message)
 
     print("输出消息中")
-    for interlocutor_uin,messages in all_messages.items():
-        txt_path = output_path / f"{interlocutor_uin}.txt"
+    for interlocutor_num,messages in all_messages.items():
+        txt_path = output_path / f"{interlocutor_num}.txt"
         for message in messages:
             message.write(txt_path)
 

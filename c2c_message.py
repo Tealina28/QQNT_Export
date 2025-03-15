@@ -1,19 +1,21 @@
+from ast import literal_eval
 from datetime import datetime
 from json import loads, JSONDecodeError
 from re import search, findall
+from xml.etree.ElementTree import fromstring
 
 import sections_pb2
 
 class Message:
 
-    def __init__(self,time_stamp,raw,sender_uin,interlocutor_uin):
+    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
         self.sections = sections_pb2.Sections()
         self.sections.ParseFromString(raw)
-        self.sender_uin = sender_uin
-        self.interlocutor_uin = interlocutor_uin
+        self.sender_num = sender_num
+        self.interlocutor_num = interlocutor_num
 
-        self.direction_symbol = 0 if sender_uin == interlocutor_uin else 1
+        self.direction_symbol = 0 if sender_num == interlocutor_num else 1
 
         # 动态初始化 functions 字典
         self.functions = {
@@ -85,15 +87,26 @@ class Message:
     def notice_content(self,section):
         info = section.noticeInfo
         info2 = section.noticeInfo2
-        # print(f"[info]{info}\n[info2]{info2}")
 
-        content = info
+        content = ""
+        if info:
+            root = fromstring(info)
+            texts = [
+                elem.get('txt')
+                for elem in root.findall('.//nor')
+                if elem.get('txt')
+            ]
+            content = ' '.join(texts)
+
+        if info2:
+            info2 = info2.replace(r"\/","/")
+            info2_dict = literal_eval(info2)
+
+            for item in info2_dict["items"]:
+                content += item.get("txt","")
+
         # 此为权宜之计，有待后续改进
-        try:
-            info_dict = loads(info)
-            output = f"[提示消息]".join(item["txt"] for item in info_dict["items"] if item["type"] in ["nor","url"])
-        except JSONDecodeError:
-            output = f"[提示消息]".join(findall(r'txt="(.*?)"',info))
+        output = f"[提示消息]{content}"
         return content,output
 
     def application_content(self,section):
