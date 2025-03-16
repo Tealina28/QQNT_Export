@@ -130,11 +130,11 @@ class Message:
         return content,output
 
     def feed_content(self,section):
-        title = section.feedTitle
-        feed_content = section.feedContent
+        title = section.feedTitle.text
+        feed_content = section.feedContent.text
         url = section.feedUrl
+        # 分 jump_schema （QQ空间内容）和 jumpUrl （更换装扮的广告和礼物提示）
         jump_info = section.feedJumpInfo
-        # print(jump_info)
 
         content = f"{title}\n{feed_content}\n{url}"
         output = f"[动态消息]\n{content}"
