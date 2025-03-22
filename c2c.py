@@ -1,4 +1,5 @@
 from c2c_message import Message
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
 
@@ -9,6 +10,14 @@ def load_mapping(cursor):
         mapping[row[0]] = row[1]
 
     return mapping
+
+def write(output_path,interlocutor_num,messages):
+        txt_path = output_path / f"{interlocutor_num}.txt"
+        for message in messages:
+            message.write(txt_path)
+
+        print(f"输出了{len(messages)}条消息到{txt_path}")
+
 
 def c2c(path):
     path = Path(path)
@@ -41,12 +50,9 @@ def c2c(path):
             all_messages[interlocutor_num] = []
         all_messages[interlocutor_num].append(message)
 
-    print("输出消息中")
-    for interlocutor_num,messages in all_messages.items():
-        txt_path = output_path / f"{interlocutor_num}.txt"
-        for message in messages:
-            message.write(txt_path)
-
-        print(f"输出了{len(messages)}条消息到{txt_path}")
+    print("正在输出消息")
+    with ThreadPoolExecutor(16) as executor:
+        for interlocutor_num,messages in all_messages.items():
+            executor.submit(write,output_path,interlocutor_num,messages)
 
     conn.close()
