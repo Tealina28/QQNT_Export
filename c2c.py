@@ -2,15 +2,6 @@ from c2c_message import Message
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
-
-def load_mapping(cursor):
-    mapping = {}
-    result = cursor.execute('SELECT "48902","1002" FROM nt_uid_mapping_table')
-    for row in result:
-        mapping[row[0]] = row[1]
-
-    return mapping
-
 def write(output_path,interlocutor_num,messages):
         txt_path = output_path / f"{interlocutor_num}.txt"
         for message in messages:
@@ -18,21 +9,12 @@ def write(output_path,interlocutor_num,messages):
 
         print(f"输出了{len(messages)}条消息到{txt_path}")
 
-
-def c2c(path):
-    path = Path(path)
-    db_path = path / "nt_msg.db"
-    output_path = path / ".." / "output" / "c2c"
+def c2c(db_path,cursor,mapping):
+    output_path = db_path / ".." / ".." / "output" / "c2c"
 
     if not output_path.exists():
         output_path.mkdir(parents=True)
         print(f"创建了输出文件夹{output_path}")
-
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-
-    print("正在加载uin索引")
-    mapping = load_mapping(cursor)
 
     all_messages = {}
     print("正在读取消息")
@@ -54,5 +36,3 @@ def c2c(path):
     with ThreadPoolExecutor(16) as executor:
         for interlocutor_num,messages in all_messages.items():
             executor.submit(write,output_path,interlocutor_num,messages)
-
-    conn.close()
