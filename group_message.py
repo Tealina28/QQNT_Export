@@ -1,23 +1,22 @@
 from ast import literal_eval
 from datetime import datetime
+from google.protobuf import text_format
 from json import loads
 from xml.etree.ElementTree import fromstring
 
-import c2c_sections_pb2
+import group_sections_pb2
 
 class Message:
 
-    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
+    def __init__(self, time_stamp, raw, sender_num, group_num):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
-        self.sections = c2c_sections_pb2.C2cSections()
+        self.sections = group_sections_pb2.GroupSections()
         try:
             self.sections.ParseFromString(raw)
         except:
             pass
         self.sender_num = sender_num
-        self.interlocutor_num = interlocutor_num
-
-        self.direction_symbol = 0 if sender_num == interlocutor_num else 1
+        self.group_num = group_num
 
         # 动态初始化 functions 字典
         self.functions = {
@@ -61,7 +60,7 @@ class Message:
 
     def image_content(self,section):
         image_text = section.imageText
-        file_name = section.imageFileName
+        file_name = section.fileName
         file_path = section.imageFilePath
         file_url = section.imageUrlOrigin
 
@@ -146,10 +145,9 @@ class Message:
     def write(self,path):
         if not path.exists():
             path.touch()
-        direction = "收" if self.direction_symbol == 0 else "发"
 
         with path.open(mode='a', encoding='utf-8') as f:
-            f.write(f"{self.readable_time} {direction}\n")
+            f.write(f"{self.readable_time} {self.sender_num}\n")
 
             for section in self.outputs:
                 f.write(f"{section}\n")

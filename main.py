@@ -1,7 +1,9 @@
-from c2c import c2c
 from pathlib import Path
 import sqlite3
 import sys
+
+from c2c import c2c
+from group import group
 
 def load_mapping(cursor):
     mapping = {}
@@ -18,7 +20,9 @@ def main():
 
     print("正在加载uid索引")
     mapping =  load_mapping(cursor)
+
     c2c(db_path,cursor,mapping)
+    group(db_path,cursor,mapping)
 
     conn.close()
 
