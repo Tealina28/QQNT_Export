@@ -14,9 +14,9 @@ message Section {
   string senderUid = 40020;
   string interlocutorUid = 40021;
 
-  uint32 senderUin = 47403;
+  uint32 senderNum = 47403;
   uint32 quotedTimestamp = 47404;
-  uint32 interlocutorUin = 47411;
+  uint32 interlocutorNum = 47411;
 
   Section quotedSection = 47423;
 
@@ -59,7 +59,7 @@ message Section {
 
   string feedUrl = 48180;
   string feedLogoUrl = 48181;
-  uint32 feedPublisherUin = 48182;
+  uint32 feedPublisherNum = 48182;
 
   string feedJumpInfo = 48183;
   string feedPublisherUid = 48188;

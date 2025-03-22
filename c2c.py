@@ -21,7 +21,7 @@ def c2c(db_path,cursor,mapping):
     for row in cursor.execute('SELECT "40020","40021","40050","40800","40030","40033" FROM c2c_msg_table ORDER BY "40050"'):
         sender_num = mapping.get(row[0],row[5])
         interlocutor_num = mapping.get(row[1],row[4])
-        # 这么做是因为num或uin有时为空，但同时为空的情况较少
+        # 这么做是因为num或uid有时为空，但同时为空的情况较少
         if row[3]:
             message = Message(row[2],row[3],sender_num,interlocutor_num)
             message.parse()

@@ -16,7 +16,7 @@ def main():
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    print("正在加载uin索引")
+    print("正在加载uid索引")
     mapping =  load_mapping(cursor)
     c2c(db_path,cursor,mapping)
 
