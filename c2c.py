@@ -1,7 +1,6 @@
 from c2c_message import Message
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-import sqlite3
+
 def write(output_path,interlocutor_num,messages):
         txt_path = output_path / f"{interlocutor_num}.txt"
         for message in messages:
