@@ -3,13 +3,13 @@ from datetime import datetime
 from json import loads
 from xml.etree.ElementTree import fromstring
 
-import sections_pb2
+import c2c_sections_pb2
 
 class Message:
 
     def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
-        self.sections = sections_pb2.Sections()
+        self.sections = c2c_sections_pb2.Sections()
         self.sections.ParseFromString(raw)
         self.sender_num = sender_num
         self.interlocutor_num = interlocutor_num
