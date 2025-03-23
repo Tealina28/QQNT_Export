@@ -1,6 +1,5 @@
 from ast import literal_eval
 from datetime import datetime
-from google.protobuf import text_format
 from json import loads
 from xml.etree.ElementTree import fromstring
 
