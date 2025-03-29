@@ -1,9 +1,9 @@
-from group_message import Message
-from concurrent.futures import ThreadPoolExecutor
+from message import GroupMessage
+
 
 def parse(param):
     time_stamp, raw, sender_num, group_num = param
-    message = Message(time_stamp, raw, sender_num, group_num)
+    message = GroupMessage(time_stamp, raw, sender_num, group_num)
     message.parse()
 
     return message

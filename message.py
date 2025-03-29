@@ -3,17 +3,13 @@ from datetime import datetime
 from json import loads
 from xml.etree.ElementTree import fromstring
 
+import c2c_sections_pb2
 import group_sections_pb2
 
 class Message:
 
     def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
-        self.sections = group_sections_pb2.GroupSections()
-        try:
-            self.sections.ParseFromString(raw)
-        except:
-            pass
         self.sender_num = sender_num
         self.interlocutor_num = interlocutor_num
 
@@ -140,6 +136,37 @@ class Message:
         content = f"{title}\n{feed_content}\n{url}"
         output = f"[动态消息]\n{content}"
         return content,output
+
+
+class C2cMessage(Message):
+    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
+        super().__init__(time_stamp, raw, sender_num, interlocutor_num)
+        self.sections = c2c_sections_pb2.C2cSections()
+        try:
+            self.sections.ParseFromString(raw)
+        except:
+            pass
+
+    def write(self,path):
+        direction = "收" if self.sender_num == self.interlocutor_num else "发"
+
+        with path.open(mode='a', encoding='utf-8') as f:
+            f.write(f"{self.readable_time} {direction}\n")
+
+            for section in self.outputs:
+                f.write(f"{section}\n")
+
+            f.write("\n")
+
+
+class GroupMessage(Message):
+    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
+        super().__init__(time_stamp, raw, sender_num, interlocutor_num)
+        self.sections = group_sections_pb2.GroupSections()
+        try:
+            self.sections.ParseFromString(raw)
+        except:
+            pass
 
     def write(self,path):
         if not path.exists():

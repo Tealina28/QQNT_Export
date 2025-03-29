@@ -1,9 +1,9 @@
-from c2c_message import Message
-from concurrent.futures import ThreadPoolExecutor
+from message import C2cMessage
+
 
 def parse(param):
     time_stamp, raw, sender_num, interlocutor_num = param
-    message = Message(time_stamp, raw, sender_num, interlocutor_num)
+    message = C2cMessage(time_stamp, raw, sender_num, interlocutor_num)
     message.parse()
 
     return message
