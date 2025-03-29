@@ -1,12 +1,17 @@
 # QQNT_Export
 
+## 讨论
+
+- **答疑**：可能会在 [Discussions](https://github.com/Tealina28/QQNT_Export/discussions) 提出开发中的问题，欢迎协助解答。
+- **讨论**：技术方案等各类讨论欢迎在 [Discussions](https://github.com/Tealina28/QQNT_Export/discussions) 中发起。
+- **协作开发**：如果您有 SQL/Protobuf 相关经验，特别欢迎参与项目改进。
+
 ## 介绍
 
 本项目用于读取并导出**解密后的**QQNT数据库中的聊天记录。
 
 解密数据库请使用[qqnt_backup](https://github.com/xCipHanD/qqnt_backup)（Android）或参照[qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)。
 
-由于作者对SQL和Protobuf一窍不通，所以代码水平较差，寻求合作者。
 
 ## 使用流程
 
@@ -32,16 +37,16 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 
 `path`指**解密后的**数据库目录路径。
 
-```bash
+```
 python main.py [path]
 ```
 
 或
 
-```bash
+```
 [二进制文件名] [path]
 ```
-若一切正常，你应该看到在`path`的上级目录生成了`outputs/c2c`目录，目录中对于每个私聊对象生成了一个`.txt`文件（不知道`0.txt和None.txt`是怎么回事）。
+若一切正常，你应该看到在`path`的上级目录生成了`outputs`目录，目录中对于每个私聊对象和群聊生成了一个`.txt`文件（不知道`0.txt和None.txt`是怎么回事）。
 
 ## 关于
 
