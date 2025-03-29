@@ -7,7 +7,7 @@ import group_sections_pb2
 
 class Message:
 
-    def __init__(self, time_stamp, raw, sender_num, group_num):
+    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
         self.sections = group_sections_pb2.GroupSections()
         try:
@@ -15,7 +15,7 @@ class Message:
         except:
             pass
         self.sender_num = sender_num
-        self.group_num = group_num
+        self.interlocutor_num = interlocutor_num
 
         # 动态初始化 functions 字典
         self.functions = {
