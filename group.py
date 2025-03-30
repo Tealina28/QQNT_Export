@@ -2,8 +2,8 @@ from message import GroupMessage
 
 
 def parse(param):
-    time_stamp, raw, sender_num, group_num = param
-    message = GroupMessage(time_stamp, raw, sender_num, group_num)
+    time_stamp, raw, sender_num, interlocutor_num = param
+    message = GroupMessage(time_stamp, raw, sender_num, interlocutor_num)
     message.parse()
 
     return message
