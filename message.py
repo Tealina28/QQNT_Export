@@ -3,8 +3,7 @@ from datetime import datetime
 from json import loads
 from xml.etree.ElementTree import fromstring
 
-import c2c_sections_pb2
-import group_sections_pb2
+import sections_pb2
 
 class Message:
 
@@ -12,6 +11,11 @@ class Message:
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
         self.sender_num = sender_num
         self.interlocutor_num = interlocutor_num
+        self.sections = sections_pb2.Sections()
+        try:
+            self.sections.ParseFromString(raw)
+        except:
+            pass
 
         # 动态初始化 functions 字典
         self.functions = {
@@ -139,13 +143,6 @@ class Message:
 
 
 class C2cMessage(Message):
-    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
-        super().__init__(time_stamp, raw, sender_num, interlocutor_num)
-        self.sections = c2c_sections_pb2.C2cSections()
-        try:
-            self.sections.ParseFromString(raw)
-        except:
-            pass
 
     def write(self,path):
         direction = "收" if self.sender_num == self.interlocutor_num else "发"
@@ -160,13 +157,6 @@ class C2cMessage(Message):
 
 
 class GroupMessage(Message):
-    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
-        super().__init__(time_stamp, raw, sender_num, interlocutor_num)
-        self.sections = group_sections_pb2.GroupSections()
-        try:
-            self.sections.ParseFromString(raw)
-        except:
-            pass
 
     def write(self,path):
         if not path.exists():

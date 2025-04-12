@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-message GroupSections { repeated GroupSection sections = 40800; }
+message Sections { repeated Section sections = 40800; }
 
-message GroupSection {
+message Section {
   uint64 id = 45001;
   uint32 type = 45002;
   // 1：文本段，2：图片段，3：文件消息，6：表情段，7：引用段，
@@ -16,9 +16,9 @@ message GroupSection {
 
   uint32 senderNum = 47403;
   uint32 quotedTimestamp = 47404;
-//  uint32 interlocutorNum = 47411;
+  uint32 interlocutorNum = 47411;
 
-  GroupSection quotedSection = 47423;
+  Section quotedSection = 47423;
 
   // 文字
   string text = 45101;
@@ -30,7 +30,7 @@ message GroupSection {
   uint64 fileTimestamp = 45505; // ?
 
   // 图片
-//  string imageFileName = ;
+//  string imageFileName = 45102;
 
   string imageUrlLow = 45802;
   string imageUrlHigh = 45803;
@@ -54,8 +54,8 @@ message GroupSection {
   string callText = 48157;
 
   // 动态消息
-  GroupFeedMessage feedTitle = 48175;
-  GroupFeedMessage feedContent = 48176;
+  FeedMessage feedTitle = 48175;
+  FeedMessage feedContent = 48176;
 
   string feedUrl = 48180;
   string feedLogoUrl = 48181;
@@ -69,4 +69,4 @@ message GroupSection {
   string noticeInfo2 = 48271; // ?
 }
 
-message GroupFeedMessage { string text = 48178; }
+message FeedMessage { string text = 48178; }
