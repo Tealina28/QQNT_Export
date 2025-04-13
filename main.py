@@ -18,9 +18,9 @@ def output_path(db_path):
     return c2c_path, group_path
 
 
-def load_mapping(cursor):
-    result = cursor.execute('SELECT "48902","1002" FROM nt_uid_mapping_table')
-    mapping = {row[0] : row[1] for row in result}
+def load_profile(cursor):
+    result = cursor.execute('SELECT "1002","20002","20009","1000" FROM profile_info_v6')
+    mapping = {row[3]: {"num": row[0], "nickname": row[1], "remark_name": row[2], "uid": row[3]} for row in result}
 
     return mapping
 
@@ -53,19 +53,23 @@ def main():
     parse_thread_num = 16
     write_thread_num = 16
 
-    db_path = Path(argv[1]) / "nt_msg.db"
-    c2c_path, group_path = output_path(db_path)
+    path = Path(argv[1])
+    c2c_path, group_path = output_path(path / "nt_msg.db")
     
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    msg_coon = sqlite3.connect(path / "nt_msg.db")
+    msg_cursor = msg_coon.cursor()
 
-    print("开始读取uid索引")
-    mapping =  load_mapping(cursor)
-    print("完成读取uid索引")
+    profile_coon = sqlite3.connect(path / "profile_info.db")
+    profile_cursor = profile_coon.cursor()
+
+    print("开始读取用户数据")
+    mapping = load_profile(profile_cursor)
+    profile_coon.close()
+    print("完成读取用户数据")
 
     print("开始读取消息")
-    c2c_params = c2c.read(cursor, mapping)
-    group_params = group.read(cursor, mapping)
+    c2c_params = c2c.read(msg_cursor, mapping)
+    group_params = group.read(msg_cursor, mapping)
     print("完成读取消息")
 
     print("开始解析消息")
@@ -78,7 +82,7 @@ def main():
     threading_write(write, group_path, group_messages, write_thread_num)
     print("完成输出消息")
 
-    conn.close()
+    msg_coon.close()
 
 
 if __name__ == "__main__":

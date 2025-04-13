@@ -10,9 +10,9 @@ def parse(param):
 
 def read(cursor, mapping):
     params = [
-        (row[2], row[3], mapping.get(row[0], row[5]), mapping.get(row[1], row[4]))
-        for row in cursor.execute('SELECT "40020","40021","40050","40800","40030","40033" FROM c2c_msg_table ORDER BY "40050"')
-        if row[3]
+        (row[4], row[5], mapping.get(row[0], {}).get("num", row[3]), mapping.get(row[1], {}).get("num", row[2]))
+        for row in cursor.execute('SELECT "40020","40021","40030","40033","40050","40800" FROM c2c_msg_table ORDER BY "40050"')
+        if row[5]
     ]
 
     return params
