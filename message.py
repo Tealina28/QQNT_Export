@@ -7,10 +7,13 @@ import sections_pb2
 
 class Message:
 
-    def __init__(self, time_stamp, raw, sender_num, interlocutor_num):
+    def __init__(self, time_stamp, raw, sender_num, interlocutor_num, username, remark_name):
         self.readable_time = datetime.fromtimestamp(time_stamp).strftime("%Y-%m-%d %H:%M:%S")
         self.sender_num = sender_num
         self.interlocutor_num = interlocutor_num
+        self.username = username
+        self.remark_name = remark_name
+        # 此处 username 和 remark_name 都指 interlocutor 的
         self.sections = sections_pb2.Sections()
         try:
             self.sections.ParseFromString(raw)
@@ -157,7 +160,9 @@ class C2cMessage(Message):
 
 
 class GroupMessage(Message):
-
+    def __init__(self, time_stamp, raw, sender_num, interlocutor_num, username, remark_name, name_card):
+        super().__init__(time_stamp, raw, sender_num, interlocutor_num, username, remark_name)
+        self.name_card = name_card
     def write(self,path):
         if not path.exists():
             path.touch()
