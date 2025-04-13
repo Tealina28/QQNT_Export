@@ -168,7 +168,7 @@ class GroupMessage(Message):
             path.touch()
 
         with path.open(mode='a', encoding='utf-8') as f:
-            f.write(f"{self.readable_time} {self.sender_num}\n")
+            f.write(f"{self.readable_time} {self.remark_name or self.name_card or self.username or self.sender_num}\n")
 
             for section in self.outputs:
                 f.write(f"{section}\n")
