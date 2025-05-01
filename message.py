@@ -1,7 +1,7 @@
 from ast import literal_eval
 from datetime import datetime
 from json import loads
-from lxml import etree
+from xml.etree.ElementTree import fromstring
 
 import unicodedata
 import sections_pb2
@@ -93,10 +93,10 @@ class Message:
         texts = []
 
         if info:
-            try:
-                info = clean_xml_text(info)
-                root = etree.fromstring(info)
-                for elem in root.iter():
+             try:
+                 info = clean_xml_text(info)
+                 root = fromstring(info)
+                 for elem in root.iter():
                     if elem.tag == "nor" and elem.get("txt"):
                         texts.append(elem.get("txt"))
                     elif elem.tag == "qq" and elem.get("uin"):
@@ -109,8 +109,8 @@ class Message:
                             or uin
                         )
                         texts.append(display_name)
-            except:
-                pass
+             except:
+                 pass
 
         if info2:
             try:
@@ -144,7 +144,6 @@ class Message:
         url = section.feedUrl
         # 分 jump_schema （QQ空间内容）和 jumpUrl （更换装扮的广告和礼物提示）
         jump_info = section.feedJumpInfo
-
         content = f"{title}\n{feed_content}\n{url}"
         output = f"[动态消息]\n{content}"
         return content, output
