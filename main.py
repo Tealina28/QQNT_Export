@@ -1,10 +1,18 @@
-from concurrent.futures import ThreadPoolExecutor
+import logging
 from pathlib import Path
 from sys import argv
-import sqlite3
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from tqdm import tqdm
 
 import c2c
-import group
+
+logging.basicConfig(
+    level=logging.INFO,  # 设置默认日志级别
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 
 def output_path(db_path):
     c2c_path = db_path / ".." / ".." / "output" / "c2c"
@@ -17,73 +25,25 @@ def output_path(db_path):
 
     return c2c_path, group_path
 
-
-def load_profile(cursor):
-    result = cursor.execute('SELECT "1002","20002","20009","1000" FROM profile_info_v6')
-    mapping = {row[3]: {"num": row[0], "nickname": row[1], "remark_name": row[2], "uid": row[3]} for row in result}
-
-    return mapping
-
-
-def threading_parse(parse, params,parse_thread_num):
-    all_messages = {}
-    with ThreadPoolExecutor(parse_thread_num) as executor:
-        for message in executor.map(parse, params):
-            if message.interlocutor_num not in all_messages:
-                all_messages[message.interlocutor_num] = []
-            all_messages[message.interlocutor_num].append(message)
-
-    return all_messages
-
-
-def write(output_path, interlocutor_num, messages):
-    txt_path = output_path / f"{interlocutor_num}.txt"
-    for message in messages:
-        message.write(txt_path)
-    print(f"输出了{len(messages)}条消息到{txt_path}")
-
-
-def threading_write(write, output_path, all_messages, write_thread_num):
-    with ThreadPoolExecutor(write_thread_num) as executor:
-        for interlocutor_num, messages in all_messages.items():
-            executor.submit(write, output_path, interlocutor_num, messages)
-
-
 def main():
-    parse_thread_num = 16
-    write_thread_num = 16
+    db_path = Path(argv[1]) / "nt_msg.db"
+    c2c_path, group_path = output_path(db_path)
 
-    path = Path(argv[1])
-    c2c_path, group_path = output_path(path / "nt_msg.db")
-    
-    msg_coon = sqlite3.connect(path / "nt_msg.db")
-    msg_cursor = msg_coon.cursor()
+    engine = create_engine(f"sqlite:///{db_path}")
+    Session = sessionmaker(bind=engine)
+    session = Session()
 
-    profile_coon = sqlite3.connect(path / "profile_info.db")
-    profile_cursor = profile_coon.cursor()
+    logging.info("成功连接数据库")
 
-    print("开始读取用户数据")
-    mapping = load_profile(profile_cursor)
-    profile_coon.close()
-    print("完成读取用户数据")
+    logging.info("开始读取私聊消息")
+    c2c_messages = c2c.read_messages(session)
+    logging.info(f"成功读取{len(c2c_messages)}条私聊消息")
 
-    print("开始读取消息")
-    c2c_params = c2c.read(msg_cursor, mapping)
-    group_params = group.read(msg_cursor, mapping)
-    print("完成读取消息")
-
-    print("开始解析消息")
-    c2c_messages = threading_parse(c2c.parse, c2c_params, parse_thread_num)
-    group_messages = threading_parse(group.parse, group_params, parse_thread_num)
-    print("完成解析消息")
-
-    print("开始输出消息")
-    threading_write(write, c2c_path, c2c_messages, write_thread_num)
-    threading_write(write, group_path, group_messages, write_thread_num)
-    print("完成输出消息")
-
-    msg_coon.close()
+    logging.info("开始解析并写入私聊消息")
+    for message in tqdm(c2c_messages):
+        message.parse()
+        message.write(c2c_path)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
