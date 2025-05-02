@@ -3,7 +3,16 @@ from datetime import datetime
 from json import loads
 from xml.etree.ElementTree import fromstring
 
+import unicodedata
 import sections_pb2
+
+
+def clean_xml_text(text):
+    text = text.replace(r'\/', '/')
+    text = text.replace('\u3000', ' ')
+    text = ''.join(c for c in text if unicodedata.category(c) not in ('Cf', 'Cc'))
+    return text
+
 
 class Message:
 
@@ -90,17 +99,20 @@ class Message:
     def notice_content(self,section):
         info = section.noticeInfo
         info2 = section.noticeInfo2
+        texts = []
 
         if not info and not info2:
             return None,"[提示消息]"
 
         if info:
-            root = fromstring(info)
-            texts = [
-                elem.get('txt')
-                for elem in root.findall('.//nor')
-                if elem.get('txt')
-            ]
+             try:
+                 info = clean_xml_text(info)
+                 root = fromstring(info)
+                 for elem in root.iter():
+                    if elem.tag == "nor" and elem.get("txt"):
+                        texts.append(elem.get("txt"))
+             except:
+                 pass
 
         if info2:
             info2 = info2.replace(r"\/","/")
