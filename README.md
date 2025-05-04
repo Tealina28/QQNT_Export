@@ -1,5 +1,10 @@
 # QQNT_Export
 
+## 全新版本
+
+QQNT_Export 全新 2.0 开发版已发布，代码可在 `dev` 分支查看。欢迎试用并提供反馈，最新开发动态请参阅 [Discussion #6](https://github.com/Tealina28/QQNT_Export/discussions/6)。
+
+
 ## 讨论
 
 - **答疑**：可能会在 [Discussions](https://github.com/Tealina28/QQNT_Export/discussions) 提出开发中的问题，欢迎协助解答。
