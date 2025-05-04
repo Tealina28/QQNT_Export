@@ -1,5 +1,6 @@
 from ast import literal_eval
 from json import loads
+from unicodedata import category
 from xml.etree.ElementTree import fromstring
 
 
@@ -57,6 +58,10 @@ class Notice:
         if not self.info and not self.info2:
             return "[提示]", None
         elif self.info:
+
+            self.info = self.info.replace(r'\/', '/').replace('\u3000', ' ')
+            self.info = ''.join(char for char in self.info if category(char) not in ('Cf', 'Cc'))
+
             root = fromstring(self.info)
             texts = [
                 elem.get('txt')
