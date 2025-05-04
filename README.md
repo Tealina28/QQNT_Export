@@ -55,11 +55,12 @@ python main.py [path]
 ## 鸣谢
 
 
-| 对象                                       | 内容                          |
-|------------------------------------------|-----------------------------|
-| [@yllhwa](https://github.com/yllhwa)     | 初始代码和Protobuf定义             |
-| [@shenapex](https://github.com/shenapex) | 数据表部分列含义，Protobuf的消息段部分字段含义 |
-| [QQDecrypt](https://qq.sbcnm.top/)       | 数据表部分列含义，Protobuf的消息段部分字段含义 |
+| 对象                                                    | 内容                          |
+|-------------------------------------------------------|-----------------------------|
+| [@yllhwa](https://github.com/yllhwa)                  | 初始代码和Protobuf定义             |
+| [@shenapex](https://github.com/shenapex)              | 数据表部分列含义，Protobuf的消息段部分字段含义 |
+| [QQDecrypt](https://qq.sbcnm.top/)                    | 数据表部分列含义，Protobuf的消息段部分字段含义 |
+| [nt_msg.py](https://github.com/BrokenC1oud/nt_msg.py) | SQLAlchemy模型                |
 
 ## 免责声明
 
