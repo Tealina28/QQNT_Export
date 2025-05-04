@@ -33,8 +33,6 @@ def main():
     Session = sessionmaker(bind=engine)
     session = Session()
 
-    logging.info("成功连接数据库")
-
     logging.info("开始读取私聊消息")
     c2c_messages = c2c.read_messages(session)
     logging.info(f"成功读取{len(c2c_messages)}条私聊消息")
