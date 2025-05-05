@@ -4,6 +4,8 @@ from sqlalchemy import String, LargeBinary, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .man import DatabaseManager
+
 import element_pb2
 import elements
 
@@ -89,6 +91,8 @@ class Message():
 
         return None, None
 
+
+@DatabaseManager.register_model("nt_msg")
 class C2cMessage(Base,Message):
     """
     C2c Message Table
@@ -106,7 +110,7 @@ class C2cMessage(Base,Message):
     UNK_25: Mapped[int] = mapped_column("40060")
     interlocutor_num: Mapped[int] = mapped_column("40030") # qq num
 
-    mapping = relationship('UserUidNum', back_populates='c2c_messages')
+    mapping = relationship('UidMapping', back_populates='c2c_messages')
 
     @property
     def direction(self):
@@ -130,6 +134,7 @@ class C2cMessage(Base,Message):
             f.write("\n")
 
 
+@DatabaseManager.register_model("nt_msg")
 class GroupMessage(Base,Message):
     """
     Group Message Table
@@ -155,8 +160,8 @@ class GroupMessage(Base,Message):
 
             f.write("\n")
 
-
-class UserUidNum(Base):
+@DatabaseManager.register_model("nt_msg")
+class UidMapping(Base):
     """
     Uid Mapping Table
     nt_msg.db -> nt_uid_mapping_table
