@@ -25,13 +25,12 @@ def output_path(db_path):
     return c2c_path, group_path
 
 
-def run_single(get_message, task_type, path):
+def run_single(query, task_type, path):
     logging.info(f"开始读取{task_type}消息")
-    messages = get_message()
-    logging.info(f"成功读取{messages.count()}条{task_type}消息")
+    logging.info(f"成功读取{query.count()}条{task_type}消息")
 
     logging.info(f"开始解析并写入{task_type}消息")
-    for message in tqdm(messages.all()):
+    for message in tqdm(query.all()):
         message.parse()
         message.write(path)
     logging.info(f"成功解析并写入{task_type}消息")
@@ -45,6 +44,10 @@ def main():
 
     run_single(dbman.c2c_messages, "私聊", c2c_path)
     run_single(dbman.group_messages, "群聊", group_path)
+    c2c_query = dbman.c2c_messages(c2c_filters)
+    group_query = dbman.group_messages(group_filters)
+    run_single(c2c_query, "私聊", c2c_path)
+    run_single(group_query, "群聊", group_path)
 
 if __name__ == '__main__':
     main()

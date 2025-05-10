@@ -1,5 +1,4 @@
 from collections import defaultdict
-import os
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -33,14 +32,23 @@ class DatabaseManager:
     def __init__(self, db_path):
         pass
 
-    def c2c_messages(self) -> Query:
-        return self._sessions["nt_msg"].query(self._models["nt_msg"]["c2c_msg_table"]).order_by(
-            self._models["nt_msg"]["c2c_msg_table"].time
-        )
+    def num_to_uid(self, num: int) -> str:
+        model = self._models["nt_msg"]["nt_uid_mapping_table"]
+        return self._sessions["nt_msg"].query(model).filter(model.qq_num == num).first().uid
 
-    def group_messages(self) -> Query:
-        return self._sessions["nt_msg"].query(self._models["nt_msg"]["group_msg_table"]).order_by(
-            self._models["nt_msg"]["group_msg_table"].time
-        )
+    def c2c_messages(self,filters) -> Query:
+        model = self._models["nt_msg"]["c2c_msg_table"]
+        query = self._sessions["nt_msg"].query(model)
+        if filters:
+            uids = [self.num_to_uid(num) for num in filters]
+            return query.filter(model.interlocutor_uid.in_(uids)).order_by(model.time)
+        else:
+            return query.order_by(model.time)
+
+
+    def group_messages(self,filters) -> Query:
+        model = self._models["nt_msg"]["group_msg_table"]
+        query = self._sessions["nt_msg"].query(model)
+        return (query.filter(model.mixed_group_num.in_(filters)) if filters else query).order_by(model.time)
 
 from .models import *
