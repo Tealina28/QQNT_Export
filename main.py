@@ -25,6 +25,17 @@ def output_path(db_path):
     return c2c_path, group_path
 
 
+def run_single(get_message, task_type, path):
+    logging.info(f"开始读取{task_type}消息")
+    messages = get_message()
+    logging.info(f"成功读取{messages.count()}条{task_type}消息")
+
+    logging.info(f"开始解析并写入{task_type}消息")
+    for message in tqdm(messages.all()):
+        message.parse()
+        message.write(path)
+    logging.info(f"成功解析并写入{task_type}消息")
+
 def main():
 
     db_path = Path(argv[1])
@@ -32,25 +43,8 @@ def main():
 
     dbman = db.DatabaseManager(db_path)
 
-    logging.info("开始读取私聊消息")
-    c2c_messages = dbman.c2c_messages()
-    logging.info(f"成功读取{c2c_messages.count()}条私聊消息")
-
-    logging.info("开始读取群聊消息")
-    group_messages = dbman.group_messages()
-    logging.info(f"成功读取{group_messages.count()}条群聊消息")
-
-    logging.info("开始解析并写入私聊消息")
-    for message in tqdm(c2c_messages.all()):
-        message.parse()
-        message.write(c2c_path)
-    logging.info("成功解析并写入私聊消息")
-
-    logging.info("开始解析并写入群聊消息")
-    for message in tqdm(group_messages.all()):
-        message.parse()
-        message.write(group_path)
-    logging.info("成功解析并写入群聊消息")
+    run_single(dbman.c2c_messages, "私聊", c2c_path)
+    run_single(dbman.group_messages, "群聊", group_path)
 
 if __name__ == '__main__':
     main()
