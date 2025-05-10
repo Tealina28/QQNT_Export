@@ -34,9 +34,13 @@ class DatabaseManager:
         pass
 
     def c2c_messages(self) -> Query:
-        return self._sessions["nt_msg"].query(self._models["nt_msg"]["c2c_msg_table"])
+        return self._sessions["nt_msg"].query(self._models["nt_msg"]["c2c_msg_table"]).order_by(
+            self._models["nt_msg"]["c2c_msg_table"].time
+        )
 
     def group_messages(self) -> Query:
-        return self._sessions["nt_msg"].query(self._models["nt_msg"]["group_msg_table"])
+        return self._sessions["nt_msg"].query(self._models["nt_msg"]["group_msg_table"]).order_by(
+            self._models["nt_msg"]["group_msg_table"].time
+        )
 
 from .models import *
