@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import String, LargeBinary, Text, ForeignKey
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -150,8 +151,12 @@ class GroupMessage(Base,Message):
     group_status: Mapped[int] = mapped_column("40060")
     group_num3: Mapped[int] = mapped_column("40030")
 
+    @hybrid_property
+    def mixed_group_num(self):
+        return self.group_num or  self.group_num2 or  self.group_num3
+
     def write(self, output_path):
-        txt_path = output_path / f"{self.group_num or  self.group_num2 or  self.group_num3}.txt"
+        txt_path = output_path / f"{self.mixed_group_num}.txt"
         with txt_path.open(mode='a', encoding='utf-8') as f:
             f.write(f"{self.readable_time} {self.group_name_card or self.nickname or self.sender_num}\n")
 
