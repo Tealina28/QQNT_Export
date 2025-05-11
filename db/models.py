@@ -117,7 +117,7 @@ class C2cMessage(Base,Message):
     def direction(self):
         if self.sender_flag == 0:
             return "收"
-        elif self.sender_flag == 1 or 2:
+        elif self.sender_flag in (1, 2):
             return "发"
         elif self.sender_flag == 5:
             return "转发"
