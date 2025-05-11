@@ -8,6 +8,7 @@ from .man import DatabaseManager
 
 import element_pb2
 import elements
+import json
 
 Base = declarative_base()
 
@@ -116,7 +117,7 @@ class C2cMessage(Base,Message):
     def direction(self):
         if self.sender_flag == 0:
             return "收"
-        elif self.sender_flag == 1 or 2:
+        elif self.sender_flag == 1 or self.sender_flag == 2:  # ?
             return "发"
         elif self.sender_flag == 5:
             return "转发"
@@ -132,6 +133,30 @@ class C2cMessage(Base,Message):
                 f.write(f"{content[0]}\n{content[1]}\n")
 
             f.write("\n")
+
+    def write_db(self):
+        """return formatted data but not write to db."""
+        msg_contents = []
+        msg_types = set()
+        for content in self.contents:
+            section = {"type": content[0], "content": content[1]}
+            msg_contents.append(section)
+            msg_types.add(content[0])
+        msg_types = filter(lambda x: x is not None, msg_types)
+        msg_contents_json = json.dumps(msg_contents)
+
+        direction_num = self.sender_flag
+
+        return (
+            self.time,
+            self.readable_time,
+            self.sender_num,
+            self.interlocutor_num,
+            "|".join(msg_types),
+            msg_contents_json,
+            self.direction.strip(),
+            direction_num,
+        )
 
 
 @DatabaseManager.register_model("nt_msg")
