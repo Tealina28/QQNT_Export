@@ -35,17 +35,26 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 
 ### 使用
 
-`path`指**解密后的**数据库目录路径。
+>usage: main.py [-h] [--c2c [C2C ...]] [--group [GROUP ...]] path
+> 
+>读取并导出解密后的QQNT数据库中的聊天记录
+>
+>positional arguments:
+>
+>  path                 解密后的数据库目录路径
+> 
+>options:
+> 
+>  -h, --help           show this help message and exit
+> 
+>  --c2c [C2C ...]      需要输出的私聊消息的QQ号列表
+> 
+>  --group [GROUP ...]  需要输出的群聊消息的群号列表
 
-```
-python main.py [path]
-```
+示例：`python main.py path --c2c 123456789 987654321 --group 12345678 .\databases\`
 
-或
+默认导出全部（留空）。
 
-```
-[二进制文件名] [path]
-```
 若一切正常，你应该看到在`path`的上级目录生成了`output`目录，目录中对于每个私聊对象和群聊生成了一个`.txt`文件（不知道`0.txt和None.txt`是怎么回事）。
 
 ## 关于
