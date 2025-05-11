@@ -65,7 +65,7 @@ def run_single(get_message, task_type, path, write_db: bool = False):
         logging.info("已启用写入数据库，正在初始化数据库")
 
         # preprocess messages
-        for message in message.all():
+        for message in messages.all():
             message.parse()
             if message.interlocutor_num not in db_connections.keys():
                 db_conn, cursor = init_db(
@@ -86,7 +86,6 @@ def run_single(get_message, task_type, path, write_db: bool = False):
             )
             db_conn.commit()
             db_conn.close()
-            cursor.close()
 
     logging.info(f"成功解析并写入{task_type}消息")
 
