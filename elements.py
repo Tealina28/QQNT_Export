@@ -24,7 +24,7 @@ class Image:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[图片]", f"{self.text}-{self.file_name}{("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
+        return "[图片]", f"{self.text}{self.file_name}{("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
 
 class File:
     def __init__(self, element):
