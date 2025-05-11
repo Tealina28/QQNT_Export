@@ -48,7 +48,7 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
       --group [GROUP ...]  需要输出的群聊消息的群号列表
 
 
-示例：`python main.py path --c2c 123456789 987654321 --group 12345678 .\databases\`
+示例：`python main.py --c2c 123456789 987654321 --group 12345678 .\databases\`
 
 默认导出全部（留空）。
 
