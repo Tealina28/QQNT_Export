@@ -35,21 +35,18 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 
 ### 使用
 
->usage: main.py [-h] [--c2c [C2C ...]] [--group [GROUP ...]] path
-> 
->读取并导出解密后的QQNT数据库中的聊天记录
->
->positional arguments:
->
->  path                 解密后的数据库目录路径
-> 
->options:
-> 
->  -h, --help           show this help message and exit
-> 
->  --c2c [C2C ...]      需要输出的私聊消息的QQ号列表
-> 
->  --group [GROUP ...]  需要输出的群聊消息的群号列表
+    usage: main.py [-h] [--c2c [C2C ...]] [--group [GROUP ...]] path
+    
+    读取并导出解密后的QQNT数据库中的聊天记录
+    
+    positional arguments:
+      path                 解密后的数据库目录路径
+    
+    options:
+      -h, --help           show this help message and exit
+      --c2c [C2C ...]      需要输出的私聊消息的QQ号列表
+      --group [GROUP ...]  需要输出的群聊消息的群号列表
+
 
 示例：`python main.py path --c2c 123456789 987654321 --group 12345678 .\databases\`
 
