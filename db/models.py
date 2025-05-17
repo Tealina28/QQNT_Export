@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from sqlalchemy import String, LargeBinary, Text, ForeignKey
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.declarative import declarative_base
@@ -8,7 +6,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .man import DatabaseManager
 
 import element_pb2
-import elements
 
 Base = declarative_base()
 
@@ -50,21 +47,6 @@ class Message():
     UNK_34: Mapped[int] = mapped_column("40083")
     UNK_35: Mapped[int] = mapped_column("40084")
 
-    elements_classes = {
-        1: elements.Text,
-        2: elements.Image,
-        3: elements.File,
-        6: elements.Emoji,
-        8: elements.Notice,
-        10: elements.Application,
-        21: elements.Call,
-        22: elements.Feed
-    }
-
-    @property
-    def readable_time(self):
-        return datetime.fromtimestamp(self.time).strftime("%Y-%m-%d %H:%M:%S")
-
     @property
     def elements(self):
         elements = element_pb2.Elements()
@@ -73,25 +55,6 @@ class Message():
             return elements
         except:
             return elements
-
-    def parse(self):
-        self.contents = []
-        for element in self.elements.elements:
-            self.contents.append(self._parse_single(element))
-
-    def _parse_single(self, element):
-        if element.type in self.elements_classes:
-            return self.elements_classes[element.type](element).content
-        elif element.type == 7:
-            result = self._parse_single(element.quotedElement)
-            if result[0]:
-                result = ("[被引用的消息]" + result[0], result[1])
-            else:
-                result = ("[被引用的消息]", result[1])
-            return result
-
-        return None, None
-
 
 @DatabaseManager.register_model("nt_msg")
 class C2cMessage(Base,Message):
@@ -113,28 +76,6 @@ class C2cMessage(Base,Message):
 
     mapping = relationship('UidMapping', back_populates='c2c_messages')
 
-    @property
-    def direction(self):
-        if self.sender_flag == 0:
-            return "收"
-        elif self.sender_flag in (1, 2):
-            return "发"
-        elif self.sender_flag == 5:
-            return "转发"
-
-        return "未知"
-
-    def write(self, output_path):
-        txt_path = output_path / f"{self.mapping.qq_num if self.mapping else self.interlocutor_num}.txt"
-        with txt_path.open(mode='a', encoding='utf-8') as f:
-            f.write(f"{self.readable_time} {self.direction}\n")
-
-            for content in self.contents:
-                f.write(f"{content[0]}\n{content[1]}\n")
-
-            f.write("\n")
-
-
 @DatabaseManager.register_model("nt_msg")
 class GroupMessage(Base,Message):
     """
@@ -142,7 +83,6 @@ class GroupMessage(Base,Message):
     nt_msg.db -> group_msg_table
     """
     __tablename__ = "group_msg_table"
-
 
     group_num: Mapped[str] = mapped_column("40021", String(24))
     group_num2: Mapped[int] = mapped_column("40027")
@@ -154,16 +94,6 @@ class GroupMessage(Base,Message):
     @hybrid_property
     def mixed_group_num(self):
         return self.group_num or  self.group_num2 or  self.group_num3
-
-    def write(self, output_path):
-        txt_path = output_path / f"{self.mixed_group_num}.txt"
-        with txt_path.open(mode='a', encoding='utf-8') as f:
-            f.write(f"{self.readable_time} {self.group_name_card or self.nickname or self.sender_num}\n")
-
-            for content in self.contents:
-                f.write(f"{content[0]}\n{content[1]}\n")
-
-            f.write("\n")
 
 @DatabaseManager.register_model("nt_msg")
 class UidMapping(Base):

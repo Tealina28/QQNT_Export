@@ -4,6 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 import db
+from export.txt_exporter import C2cExporter,GroupExporter
 
 parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
 
@@ -31,14 +32,15 @@ def output_path(db_path):
     return c2c_path, group_path
 
 
-def run_single(query, task_type, path):
+def run_single( task_type, query, Exporter, path):
     logging.info(f"开始读取{task_type}消息")
     logging.info(f"成功读取{query.count()}条{task_type}消息")
 
     logging.info(f"开始解析并写入{task_type}消息")
     for message in tqdm(query.all()):
-        message.parse()
-        message.write(path)
+        exporter = Exporter(message)
+        exporter.write(output_path=path)
+
     logging.info(f"成功解析并写入{task_type}消息")
 
 def main():
@@ -55,8 +57,8 @@ def main():
     c2c_query = dbman.c2c_messages(c2c_filters)
     group_query = dbman.group_messages(group_filters)
 
-    run_single(c2c_query, "私聊", c2c_path)
-    run_single(group_query, "群聊", group_path)
+    run_single("私聊", c2c_query, C2cExporter, c2c_path)
+    run_single("群聊", group_query, GroupExporter, group_path)
 
 if __name__ == '__main__':
     main()
