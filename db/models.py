@@ -1,7 +1,7 @@
 from sqlalchemy import String, LargeBinary, Text, ForeignKey
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
 
 from .man import DatabaseManager
 
@@ -76,6 +76,11 @@ class C2cMessage(Base,Message):
     UNK_25: Mapped[int] = mapped_column("40060")
     interlocutor_num: Mapped[int] = mapped_column("40030") # qq num
 
+    @property
+    def profile_info(self):
+        return object_session(self).query(ProfileInfo).filter(ProfileInfo.uid == self.interlocutor_uid).first()
+
+
     mapping = relationship('UidMapping', back_populates='c2c_messages')
 
 @DatabaseManager.register_model("nt_msg")
@@ -111,3 +116,55 @@ class UidMapping(Base):
     qq_num: Mapped[int] = mapped_column("1002")
 
     c2c_messages = relationship("C2cMessage", back_populates="mapping")
+
+
+@DatabaseManager.register_model("profile_info")
+class ProfileInfo(Base):
+    """
+    好友信息
+    profile_info.db -> profile_info_v6
+    """
+    __tablename__ = "profile_info_v6"
+    qid: Mapped[str] = mapped_column("1001")
+    qq_num: Mapped[int] = mapped_column("1002")
+    nickname: Mapped[str] = mapped_column("20002")
+    UNK_4: Mapped[str] = mapped_column("24106")
+    UNK_5: Mapped[str] = mapped_column("24107")
+    UNK_6: Mapped[str] = mapped_column("24108")
+    UNK_7: Mapped[str] = mapped_column("24109")
+    remark: Mapped[str] = mapped_column("20009")
+    signature: Mapped[str] = mapped_column("20011")
+    uid: Mapped[str] = mapped_column("1000", primary_key=True)
+    UNK_11: Mapped[int] = mapped_column("20001")
+    UNK_12: Mapped[int] = mapped_column("20003")
+    avatar_url: Mapped[str] = mapped_column("20004")
+    UNK_14: Mapped[int] = mapped_column("20005")
+    UNK_15: Mapped[int] = mapped_column("20006")
+    UNK_16: Mapped[int] = mapped_column("20007")
+    UNK_17: Mapped[int] = mapped_column("20008")
+    UNK_18: Mapped[int] = mapped_column("20010")
+    UNK_19: Mapped[int] = mapped_column("20012")
+    UNK_20: Mapped[int] = mapped_column("20014")
+    UNK_21: Mapped[bytes] = mapped_column("20017")
+    UNK_22: Mapped[int] = mapped_column("20016")
+    UNK_23: Mapped[int] = mapped_column("24103")
+    UNK_24: Mapped[bytes] = mapped_column("20042")
+    UNK_25: Mapped[bytes] = mapped_column("20059")
+    UNK_26: Mapped[int] = mapped_column("20060")
+    UNK_27: Mapped[int] = mapped_column("20061")
+    UNK_28: Mapped[int] = mapped_column("20043")
+    UNK_29: Mapped[int] = mapped_column("20048")
+    UNK_30: Mapped[int] = mapped_column("20037")
+    UNK_31: Mapped[int] = mapped_column("20056")
+    UNK_32: Mapped[int] = mapped_column("20067")
+    UNK_33: Mapped[bytes] = mapped_column("20057")
+    UNK_34: Mapped[int] = mapped_column("20070")
+    UNK_35: Mapped[int] = mapped_column("20071")
+    UNK_36: Mapped[bytes] = mapped_column("21000")
+    relation: Mapped[bytes] = mapped_column("20072")
+    UNK_38: Mapped[int] = mapped_column("20075")
+    UNK_39: Mapped[bytes] = mapped_column("20066")
+    UNK_40: Mapped[int] = mapped_column("24104")
+    UNK_41: Mapped[bytes] = mapped_column("24105")
+    UNK_42: Mapped[int] = mapped_column("24110")
+    UNK_43: Mapped[int] = mapped_column("24111")

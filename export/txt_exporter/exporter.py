@@ -51,7 +51,14 @@ class C2cExporter(BaseExporter):
     def write(self,output_path):
         self._extract()
 
-        txt_path = output_path / f"{self.message.mapping.qq_num if self.message.mapping else self.message.interlocutor_num}.txt"
+        if self.message.profile_info:
+            filename = self.message.profile_info.remark or self.message.profile_info.nickname
+        elif self.message.mapping:
+            filename = self.message.mapping.qq_num
+        else:
+            filename = self.message.interlocutor_num
+
+        txt_path = output_path / f"{filename}.txt"
         with txt_path.open(mode='a', encoding='utf-8') as f:
             f.write(f"{self.readable_time} {self.direction}\n")
 
