@@ -7,6 +7,8 @@ from .man import DatabaseManager
 
 import element_pb2
 
+__all__ =  ["C2cMessage", "GroupMessage", "UidMapping", ]
+
 Base = declarative_base()
 
 class Message():
