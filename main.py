@@ -13,6 +13,9 @@ parser.add_argument("path", type=str, help="解密后的数据库目录路径")
 parser.add_argument("--c2c", nargs="*", type=int, help="需要输出的私聊消息的QQ号列表")
 parser.add_argument("--group", nargs="*", type=int, help="需要输出的群聊消息的群号列表")
 parser.add_argument(
+    "--output_path", type=str, default=None, help="导出的路径，默认为数据库上级目录"
+)
+parser.add_argument(
     "--output_types",
     "-o",
     default=["txt"],
@@ -32,9 +35,10 @@ exporter_map = {
     "json": {"c2c": C2cJsonExporter, "group": GroupJsonExporter},
 }
 
-def output_path(db_path):
-    c2c_path = db_path / ".." / "output" / "c2c"
-    group_path = db_path / ".." / "output" / "group"
+
+def output_path(path):
+    c2c_path = path / "output" / "c2c"
+    group_path = path / "output" / "group"
 
     if not c2c_path.exists():
         c2c_path.mkdir(parents=True)
@@ -58,9 +62,12 @@ def run_single(task_type, query, Exporter, path):
 
 def main():
     args = parser.parse_args()
-
     db_path = Path(args.path)
-    c2c_path, group_path = output_path(db_path)
+
+    if args.output_path is None:
+        args.output_path = db_path / ".."
+
+    c2c_path, group_path = output_path(args.output_path)
 
     dbman = db.DatabaseManager(db_path)
 
