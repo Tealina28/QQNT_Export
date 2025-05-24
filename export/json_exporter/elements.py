@@ -67,7 +67,7 @@ class Emoji:
 
     def _get_content(self):
         if not self.text:
-            self.text = emoji_table.get(self.emoji_id, "未知表情")
+            self.text = emoji_table.get(str(self.emoji_id), "未知表情")
         return "[表情]", f"{self.text}-{self.emoji_id}"
 
 
