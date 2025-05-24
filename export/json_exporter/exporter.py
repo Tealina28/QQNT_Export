@@ -16,7 +16,12 @@ class WriteManager:
 
     def __del__(self):
         for path in self.export_table:
-            json.dump(self.export_table[path], path.open(mode="w+", encoding="utf-8"))
+            json.dump(
+                self.export_table[path],
+                path.open(mode="w+", encoding="utf-8"),
+                ensure_ascii=False,
+                indent=2,
+            )
 
 
 c2c_manager = WriteManager()

@@ -1,4 +1,5 @@
 import json
+import os
 from ast import literal_eval
 from json import loads
 from unicodedata import category
@@ -15,7 +16,10 @@ __all__ = [
     "Feed",
 ]
 
-emoji_table = json.load(open("emojis.json", "r", encoding="utf-8"))
+module_dir = os.path.dirname(os.path.abspath(__file__))
+emoji_table = json.load(
+    open(os.path.join(module_dir, "emojis.json"), "r", encoding="utf-8")
+)
 
 
 class Text:
