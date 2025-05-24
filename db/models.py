@@ -9,6 +9,8 @@ import element_pb2
 
 __all__ =  ["C2cMessage", "GroupMessage", "UidMapping", ]
 
+profile_map = {}
+
 Base = declarative_base()
 
 class Message():
@@ -78,8 +80,16 @@ class C2cMessage(Base,Message):
 
     @property
     def profile_info(self):
-        return object_session(self).query(ProfileInfo).filter(ProfileInfo.uid == self.interlocutor_uid).first()
-
+        if self.interlocutor_uid in profile_map:
+            return profile_map[self.interlocutor_uid]
+        query_result = (
+            object_session(self)
+            .query(ProfileInfo)
+            .filter(ProfileInfo.uid == self.interlocutor_uid)
+            .first()
+        )
+        profile_map[self.interlocutor_uid] = query_result
+        return query_result
 
     mapping = relationship('UidMapping', back_populates='c2c_messages')
 
