@@ -1,1 +1,1 @@
-from .exporter import C2cExporter,GroupExporter
+from .exporter import C2cTxtExporter,GroupTxtExporter

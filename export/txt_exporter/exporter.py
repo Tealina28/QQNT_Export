@@ -2,7 +2,7 @@ from datetime import datetime
 
 from .elements import *
 
-__all__ = ["C2cExporter", "GroupExporter"]
+__all__ = ["C2cTxtExporter", "GroupTxtExporter"]
 
 class BaseExporter:
     def __init__(self, message):
@@ -37,7 +37,7 @@ class BaseExporter:
 
         return None, None
 
-class C2cExporter(BaseExporter):
+class C2cTxtExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
         if message.sender_flag == 0:
@@ -67,7 +67,7 @@ class C2cExporter(BaseExporter):
 
             f.write("\n")
 
-class GroupExporter(BaseExporter):
+class GroupTxtExporter(BaseExporter):
     def  __init__(self, message):
         super().__init__(message)
 

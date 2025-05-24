@@ -4,7 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 import db
-from export.txt_exporter import C2cExporter,GroupExporter
+from export.txt_exporter import C2cTxtExporter,GroupTxtExporter
 from export.json_exporter import C2cJsonExporter, GroupJsonExporter
 
 parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 
 exporter_map = {
-    "txt": {"c2c": C2cExporter, "group": GroupExporter},
+    "txt": {"c2c": C2cTxtExporter, "group": GroupTxtExporter},
     "json": {"c2c": C2cJsonExporter, "group": GroupJsonExporter},
 }
 
