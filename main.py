@@ -86,7 +86,7 @@ def main():
         run_single("私聊", c2c_query, c2c_exporter, c2c_path)
         run_single("群聊", group_query, group_exporter, group_path)
 
-        logging.info(f"{output_type}格式导出完成")
+        logging.info(f"成功导出{output_type}格式")
 
 if __name__ == '__main__':
     main()

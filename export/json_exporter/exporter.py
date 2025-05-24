@@ -4,7 +4,7 @@ from .elements import *
 from collections import defaultdict
 import json
 
-__all__ = ["C2cExporter", "GroupExporter"]
+__all__ = ["C2cJsonExporter", "GroupJsonExporter"]
 
 
 class WriteManager:
@@ -96,15 +96,6 @@ class C2cJsonExporter(BaseExporter):
         }
         c2c_manager.add_msg(json_path, msg_dict)
 
-        # with txt_path.open(mode="a", encoding="utf-8") as f:
-        #     f.write(f"{self.readable_time} {self.direction}\n")
-
-        #     for content in self.contents:
-        #         f.write(f"{content[0]}\n{content[1]}\n")
-
-        #     f.write("\n")
-
-
 class GroupJsonExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
@@ -125,12 +116,3 @@ class GroupJsonExporter(BaseExporter):
         }
         group_manager.add_msg(json_path, msg_dict)
 
-        # with txt_path.open(mode="a", encoding="utf-8") as f:
-        #     f.write(
-        #         f"{self.readable_time} {self.message.group_name_card or self.message.nickname or self.message.sender_num}\n"
-        #     )
-
-        #     for content in self.contents:
-        #         f.write(f"{content[0]}\n{content[1]}\n")
-
-        #     f.write("\n")
