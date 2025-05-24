@@ -6,9 +6,6 @@ from tqdm import tqdm
 import db
 from export.txt_exporter import C2cExporter,GroupExporter
 from export.json_exporter import C2cJsonExporter, GroupJsonExporter
-from viztracer import VizTracer
-
-tracer = VizTracer(max_stack_depth=5)
 
 parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
 
@@ -81,7 +78,7 @@ def main():
 
     c2c_query = dbman.c2c_messages(c2c_filters)
     group_query = dbman.group_messages(group_filters)
-    tracer.start()
+
     for output_type in args.output_types:
         c2c_exporter = exporter_map[output_type]["c2c"]
         group_exporter = exporter_map[output_type]["group"]
@@ -90,8 +87,6 @@ def main():
         run_single("群聊", group_query, group_exporter, group_path)
 
         logging.info(f"{output_type}格式导出完成")
-    tracer.stop()
-    tracer.save("./trace.json")
 
 if __name__ == '__main__':
     main()
