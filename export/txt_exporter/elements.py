@@ -3,6 +3,8 @@ from json import loads
 from unicodedata import category
 from xml.etree.ElementTree import fromstring
 
+from emojis import emojis
+
 __all__ = [
     "Text",
     "Image",
@@ -54,6 +56,8 @@ class Emoji:
         self.content = self._get_content()
 
     def _get_content(self):
+        if not self.text:
+            self.text = emojis.get(self.emoji_id, "未知表情")
         return "[表情]", f"{self.text}-{self.emoji_id}"
 
 

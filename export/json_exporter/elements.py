@@ -5,6 +5,8 @@ from json import loads
 from unicodedata import category
 from xml.etree.ElementTree import fromstring
 
+from emojis import emojis
+
 __all__ = [
     "Text",
     "Image",
@@ -15,12 +17,6 @@ __all__ = [
     "Call",
     "Feed",
 ]
-
-module_dir = os.path.dirname(os.path.abspath(__file__))
-emoji_table = json.load(
-    open(os.path.join(module_dir, "emojis.json"), "r", encoding="utf-8")
-)
-
 
 class Text:
     def __init__(self, element):
@@ -67,7 +63,7 @@ class Emoji:
 
     def _get_content(self):
         if not self.text:
-            self.text = emoji_table.get(str(self.emoji_id), "未知表情")
+            self.text = emojis.get(self.emoji_id, "未知表情")
         return "[表情]", f"{self.text}-{self.emoji_id}"
 
 
