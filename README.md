@@ -44,14 +44,14 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
     
     options:
       -h, --help            show this help message and exit
-      --c2c [C2C ...]       需要输出的私聊消息的QQ号列表
-      --group [GROUP ...]   需要输出的群聊消息的群号列表
+      --c2c [C2C ...]       需要输出的私聊消息的QQ号列表，默认导出全部
+      --group [GROUP ...]   需要输出的群聊消息的群号列表，默认导出全部
       --output_path OUTPUT_PATH
                             导出的路径，默认为数据库上级目录
       --output_types, -o {txt,json} [{txt,json} ...]
-                            需要导出的文件格式
+                            需要导出的文件格式，默认txt
 
-示例：`python main.py --c2c 123456789 987654321 --group 12345678 .\databases\`
+示例：`python main.py --c2c 123456789 987654321 --group 12345678 .\databases\ --output_path .\output\ -o json`
 
 默认导出全部（留空）。
 

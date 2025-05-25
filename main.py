@@ -10,8 +10,8 @@ from export.json_exporter import C2cJsonExporter, GroupJsonExporter
 parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
 
 parser.add_argument("path", type=str, help="解密后的数据库目录路径")
-parser.add_argument("--c2c", nargs="*", type=int, help="需要输出的私聊消息的QQ号列表")
-parser.add_argument("--group", nargs="*", type=int, help="需要输出的群聊消息的群号列表")
+parser.add_argument("--c2c", nargs="*", type=int, help="需要输出的私聊消息的QQ号列表，默认导出全部")
+parser.add_argument("--group", nargs="*", type=int, help="需要输出的群聊消息的群号列表，默认导出全部")
 parser.add_argument(
     "--output_path", type=str, default=None, help="导出的路径，默认为数据库上级目录"
 )
@@ -21,7 +21,7 @@ parser.add_argument(
     default=["txt"],
     nargs="+",
     choices=["txt", "json"],
-    help="需要导出的文件格式",
+    help="需要导出的文件格式，默认txt",
 )
 
 logging.basicConfig(
