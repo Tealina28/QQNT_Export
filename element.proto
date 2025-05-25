@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-message Sections { repeated Section sections = 40800; }
+message Elements { repeated Element elements = 40800; }
 
-message Section {
+message Element {
   uint64 id = 45001;
   uint32 type = 45002;
   // 1：文本段，2：图片段，3：文件消息，6：表情段，7：引用段，
@@ -18,7 +18,7 @@ message Section {
   uint32 quotedTimestamp = 47404;
   uint32 interlocutorNum = 47411;
 
-  Section quotedSection = 47423;
+  Element quotedElement = 47423;
 
   // 文字
   string text = 45101;

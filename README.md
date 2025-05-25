@@ -1,10 +1,5 @@
 # QQNT_Export
 
-## 全新版本
-
-QQNT_Export 全新 2.0 开发版已发布，代码可在 `dev` 分支查看。欢迎试用并提供反馈，最新开发动态请参阅 [Discussion #6](https://github.com/Tealina28/QQNT_Export/discussions/6)。
-
-
 ## 讨论
 
 - **答疑**：可能会在 [Discussions](https://github.com/Tealina28/QQNT_Export/discussions) 提出开发中的问题，欢迎协助解答。
@@ -40,17 +35,26 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 
 ### 使用
 
-`path`指**解密后的**数据库目录路径。
+    usage: main.py [-h] [--c2c [C2C ...]] [--group [GROUP ...]] [--output_path OUTPUT_PATH] [--output_types {txt,json} [{txt,json} ...]] path
+    
+    读取并导出解密后的QQNT数据库中的聊天记录
+    
+    positional arguments:
+      path                  解密后的数据库目录路径
+    
+    options:
+      -h, --help            show this help message and exit
+      --c2c [C2C ...]       需要输出的私聊消息的QQ号列表
+      --group [GROUP ...]   需要输出的群聊消息的群号列表
+      --output_path OUTPUT_PATH
+                            导出的路径，默认为数据库上级目录
+      --output_types, -o {txt,json} [{txt,json} ...]
+                            需要导出的文件格式
 
-```
-python main.py [path]
-```
+示例：`python main.py --c2c 123456789 987654321 --group 12345678 .\databases\`
 
-或
+默认导出全部（留空）。
 
-```
-[二进制文件名] [path]
-```
 若一切正常，你应该看到在`path`的上级目录生成了`output`目录，目录中对于每个私聊对象和群聊生成了一个`.txt`文件（不知道`0.txt和None.txt`是怎么回事）。
 
 ## 关于
@@ -60,11 +64,12 @@ python main.py [path]
 ## 鸣谢
 
 
-| 对象                                       | 内容                          |
-|------------------------------------------|-----------------------------|
-| [@yllhwa](https://github.com/yllhwa)     | 初始代码和Protobuf定义             |
-| [@shenapex](https://github.com/shenapex) | 数据表部分列含义，Protobuf的消息段部分字段含义 |
-| [QQDecrypt](https://qq.sbcnm.top/)       | 数据表部分列含义，Protobuf的消息段部分字段含义 |
+| 对象                                                    | 内容                                       |
+|-------------------------------------------------------|------------------------------------------|
+| [@yllhwa](https://github.com/yllhwa)                  | 初始代码和Protobuf定义                          |
+| [@shenapex](https://github.com/shenapex)              | 数据表部分列含义，Protobuf的消息段部分字段含义              |
+| [QQDecrypt](https://qq.sbcnm.top/)                    | 数据表部分列含义，Protobuf的消息段部分字段含义              |
+| [nt_msg.py](https://github.com/BrokenC1oud/nt_msg.py) | SQLAlchemy模型, DatabaseManager（抄了好多，大佬好强） |
 
 ## 免责声明
 

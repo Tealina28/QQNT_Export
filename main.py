@@ -1,14 +1,44 @@
-from concurrent.futures import ThreadPoolExecutor
+import logging
+import argparse
 from pathlib import Path
-from sys import argv
-import sqlite3
+from tqdm import tqdm
 
-import c2c
-import group
+import db
+from export.txt_exporter import C2cTxtExporter,GroupTxtExporter
+from export.json_exporter import C2cJsonExporter, GroupJsonExporter
 
-def output_path(db_path):
-    c2c_path = db_path / ".." / ".." / "output" / "c2c"
-    group_path = db_path / ".." / ".." / "output" / "group"
+parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
+
+parser.add_argument("path", type=str, help="解密后的数据库目录路径")
+parser.add_argument("--c2c", nargs="*", type=int, help="需要输出的私聊消息的QQ号列表")
+parser.add_argument("--group", nargs="*", type=int, help="需要输出的群聊消息的群号列表")
+parser.add_argument(
+    "--output_path", type=str, default=None, help="导出的路径，默认为数据库上级目录"
+)
+parser.add_argument(
+    "--output_types",
+    "-o",
+    default=["txt"],
+    nargs="+",
+    choices=["txt", "json"],
+    help="需要导出的文件格式",
+)
+
+logging.basicConfig(
+    level=logging.INFO,  # 设置默认日志级别
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+exporter_map = {
+    "txt": {"c2c": C2cTxtExporter, "group": GroupTxtExporter},
+    "json": {"c2c": C2cJsonExporter, "group": GroupJsonExporter},
+}
+
+
+def output_path(path):
+    c2c_path = path / "output" / "c2c"
+    group_path = path / "output" / "group"
 
     if not c2c_path.exists():
         c2c_path.mkdir(parents=True)
@@ -18,72 +48,45 @@ def output_path(db_path):
     return c2c_path, group_path
 
 
-def load_profile(cursor):
-    result = cursor.execute('SELECT "1002","20002","20009","1000" FROM profile_info_v6')
-    mapping = {row[3]: {"num": row[0], "nickname": row[1], "remark_name": row[2], "uid": row[3]} for row in result}
+def run_single(task_type, query, Exporter, path):
+    logging.info(f"开始读取{task_type}消息")
+    logging.info(f"成功读取{query.count()}条{task_type}消息")
 
-    return mapping
+    logging.info(f"开始解析并写入{task_type}消息")
+    for message in tqdm(query.all()):
+        exporter = Exporter(message)
+        exporter.write(output_path=path)
 
-
-def threading_parse(parse, params,parse_thread_num):
-    all_messages = {}
-    with ThreadPoolExecutor(parse_thread_num) as executor:
-        for message in executor.map(parse, params):
-            if message.interlocutor_num not in all_messages:
-                all_messages[message.interlocutor_num] = []
-            all_messages[message.interlocutor_num].append(message)
-
-    return all_messages
-
-
-def write(output_path, interlocutor_num, messages):
-    txt_path = output_path / f"{interlocutor_num}.txt"
-    for message in messages:
-        message.write(txt_path)
-    print(f"输出了{len(messages)}条消息到{txt_path}")
-
-
-def threading_write(write, output_path, all_messages, write_thread_num):
-    with ThreadPoolExecutor(write_thread_num) as executor:
-        for interlocutor_num, messages in all_messages.items():
-            executor.submit(write, output_path, interlocutor_num, messages)
+    logging.info(f"成功解析并写入{task_type}消息")
 
 
 def main():
-    parse_thread_num = 16
-    write_thread_num = 16
+    args = parser.parse_args()
+    db_path = Path(args.path)
 
-    path = Path(argv[1])
-    c2c_path, group_path = output_path(path / "nt_msg.db")
-    
-    msg_coon = sqlite3.connect(path / "nt_msg.db")
-    msg_cursor = msg_coon.cursor()
+    if args.output_path is None:
+        args.output_path = Path(db_path / "..")
+    else:
+        args.output_path = Path(args.output_path)
 
-    profile_coon = sqlite3.connect(path / "profile_info.db")
-    profile_cursor = profile_coon.cursor()
+    c2c_path, group_path = output_path(args.output_path)
 
-    print("开始读取用户数据")
-    mapping = load_profile(profile_cursor)
-    profile_coon.close()
-    print("完成读取用户数据")
+    dbman = db.DatabaseManager(db_path)
 
-    print("开始读取消息")
-    c2c_params = c2c.read(msg_cursor, mapping)
-    group_params = group.read(msg_cursor, mapping)
-    print("完成读取消息")
+    c2c_filters = args.c2c
+    group_filters = args.group
 
-    print("开始解析消息")
-    c2c_messages = threading_parse(c2c.parse, c2c_params, parse_thread_num)
-    group_messages = threading_parse(group.parse, group_params, parse_thread_num)
-    print("完成解析消息")
+    c2c_query = dbman.c2c_messages(c2c_filters)
+    group_query = dbman.group_messages(group_filters)
 
-    print("开始输出消息")
-    threading_write(write, c2c_path, c2c_messages, write_thread_num)
-    threading_write(write, group_path, group_messages, write_thread_num)
-    print("完成输出消息")
+    for output_type in args.output_types:
+        c2c_exporter = exporter_map[output_type]["c2c"]
+        group_exporter = exporter_map[output_type]["group"]
 
-    msg_coon.close()
+        run_single("私聊", c2c_query, c2c_exporter, c2c_path)
+        run_single("群聊", group_query, group_exporter, group_path)
 
+        logging.info(f"成功导出{output_type}格式")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
