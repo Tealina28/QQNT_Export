@@ -1,31 +1,32 @@
-from datetime import datetime
-from pathlib import Path
-from .elements import *
 from collections import defaultdict
-import json
+from datetime import datetime
+from json import dump
+from pathlib import Path
+
+from .elements import *
 
 __all__ = ["C2cJsonExporter", "GroupJsonExporter"]
 
 
-class WriteManager:
+class ExportManager:
     def __init__(self):
-        self.export_table: dict[list[dict]] = defaultdict(list)
+        self.export_queue: dict[Path:list[dict]] = defaultdict(list)
 
-    def add_msg(self, path: Path, content: dict):
-        self.export_table[path].append(content)
+    def add(self, path: Path, content: dict):
+        self.export_queue[path].append(content)
 
     def __del__(self):
-        for path in self.export_table:
-            json.dump(
-                self.export_table[path],
+        for path in self.export_queue:
+            dump(
+                self.export_queue[path],
                 path.open(mode="w+", encoding="utf-8"),
                 ensure_ascii=False,
                 indent=2,
             )
 
 
-c2c_manager = WriteManager()
-group_manager = WriteManager()
+c2c_manager = ExportManager()
+group_manager = ExportManager()
 
 
 class BaseExporter:
@@ -80,9 +81,7 @@ class C2cJsonExporter(BaseExporter):
         self._extract()
 
         if self.message.profile_info:
-            filename = (
-                self.message.profile_info.remark or self.message.profile_info.nickname
-            )
+            filename = self.message.profile_info.remark or self.message.profile_info.nickname
         elif self.message.mapping:
             filename = self.message.mapping.qq_num
         else:
@@ -94,7 +93,8 @@ class C2cJsonExporter(BaseExporter):
             "direction": self.direction,
             "contents": self.contents,
         }
-        c2c_manager.add_msg(json_path, msg_dict)
+        c2c_manager.add(json_path, msg_dict)
+
 
 class GroupJsonExporter(BaseExporter):
     def __init__(self, message):
@@ -107,12 +107,11 @@ class GroupJsonExporter(BaseExporter):
         msg_dict = {
             "time": self.readable_time,
             "sender": (
-                self.message.group_name_card
-                or self.message.nickname
-                or self.message.sender_num
+                    self.message.group_name_card
+                    or self.message.nickname
+                    or self.message.sender_num
             ),
             "sender_qq": self.message.sender_num,
             "contents": self.contents,
         }
-        group_manager.add_msg(json_path, msg_dict)
-
+        group_manager.add(json_path, msg_dict)

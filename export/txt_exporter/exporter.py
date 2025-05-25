@@ -1,8 +1,29 @@
+from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 
 from .elements import *
 
 __all__ = ["C2cTxtExporter", "GroupTxtExporter"]
+
+
+class ExportManager:
+    def __init__(self):
+        self.export_queue: dict[Path:list] = defaultdict(list)
+
+    def add(self, path: Path, content: str):
+        self.export_queue[path].append(content)
+
+    def __del__(self):
+        for path in self.export_queue:
+            with path.open(mode="w+", encoding="utf-8") as f:
+                for content in self.export_queue[path]:
+                    f.write(content)
+
+
+c2c_manager = ExportManager()
+group_manager = ExportManager()
+
 
 class BaseExporter:
     def __init__(self, message):
@@ -10,21 +31,21 @@ class BaseExporter:
         self.readable_time = datetime.fromtimestamp(message.time).strftime("%Y-%m-%d %H:%M:%S")
         self.contents = []
         self.elements_map = {
-            1:Text,
-            2:Image,
-            3:File,
-            6:Emoji,
-            8:Notice,
-            10:Application,
-            21:Call,
-            22:Feed
+            1: Text,
+            2: Image,
+            3: File,
+            6: Emoji,
+            8: Notice,
+            10: Application,
+            21: Call,
+            22: Feed
         }
 
     def _extract(self):
         for element in self.message.elements.elements:
             self.contents.append(self._extract_single(element))
-            
-    def  _extract_single(self, element):
+
+    def _extract_single(self, element):
         if element.type in self.elements_map:
             return self.elements_map[element.type](element).content
         elif element.type == 7:
@@ -37,18 +58,20 @@ class BaseExporter:
 
         return None, None
 
+
 class C2cTxtExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
         if message.sender_flag == 0:
             self.direction = "收"
-        elif message.sender_flag in (1,2):
+        elif message.sender_flag in (1, 2):
             self.direction = "发"
         elif message.sender_flag == 8:
             self.direction = "转发"
         else:
             self.direction = "未知"
-    def write(self,output_path):
+
+    def write(self, output_path):
         self._extract()
 
         if self.message.profile_info:
@@ -59,25 +82,29 @@ class C2cTxtExporter(BaseExporter):
             filename = self.message.interlocutor_num
 
         txt_path = output_path / f"{filename}.txt"
-        with txt_path.open(mode='a', encoding='utf-8') as f:
-            f.write(f"{self.readable_time} {self.direction}\n")
 
-            for content in self.contents:
-                f.write(f"{content[0]}\n{content[1]}\n")
+        content_str = f"""{self.readable_time} {self.direction}\n"""
 
-            f.write("\n")
+        for content in self.contents:
+            content_str += f"{content[0]}\n{content[1]}\n"
+
+        content_str += "\n"
+
+        c2c_manager.add(txt_path, content_str)
+
 
 class GroupTxtExporter(BaseExporter):
-    def  __init__(self, message):
+    def __init__(self, message):
         super().__init__(message)
 
     def write(self, output_path):
         self._extract()
         txt_path = output_path / f"{self.message.mixed_group_num}.txt"
-        with txt_path.open(mode='a', encoding='utf-8') as f:
-            f.write(f"{self.readable_time} {self.message.group_name_card or self.message.nickname or self.message.sender_num}\n")
+        content_str = f"""{self.readable_time} {self.message.group_name_card or self.message.nickname or self.message.sender_num}\n"""
 
-            for content in self.contents:
-                f.write(f"{content[0]}\n{content[1]}\n")
+        for content in self.contents:
+            content_str += f"{content[0]}\n{content[1]}\n"
 
-            f.write("\n")
+        content_str += "\n"
+
+        group_manager.add(txt_path, content_str)
