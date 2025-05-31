@@ -1,8 +1,9 @@
 from ast import literal_eval
-from humanize import naturalsize
 from json import loads
-from unicodedata import category
 from xml.etree.ElementTree import fromstring
+
+from humanize import naturalsize
+from unicodedata import category
 
 from emojis import emojis
 
@@ -19,8 +20,10 @@ __all__ = [
     "Feed",
 ]
 
+
 def readable_file_size(file_size):
     return naturalsize(file_size, binary=True, format="%.2f") if file_size else None
+
 
 class Text:
     def __init__(self, element):
@@ -29,6 +32,7 @@ class Text:
 
     def _get_content(self):
         return "[文本]", self.text
+
 
 class Image:
     def __init__(self, element):
@@ -43,6 +47,7 @@ class Image:
     def _get_content(self):
         return "[图片]", f"{self.text}{self.file_name} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
 
+
 class File:
     def __init__(self, element):
         self.file_name = element.fileName
@@ -52,6 +57,7 @@ class File:
 
     def _get_content(self):
         return "[文件]", f"{self.file_name} {self.readable_size}"
+
 
 class Voice:
     def __init__(self, element):
@@ -65,6 +71,7 @@ class Voice:
     def _get_content(self):
         return "[语音]", f"{self.voice_len}″ {self.voice_text} {('\n' + self.file_name) or ''} {self.readable_size}"
 
+
 class Video:
     def __init__(self, element):
         self.video_len = element.videoLen
@@ -77,6 +84,7 @@ class Video:
     def _get_content(self):
         return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
 
+
 class Emoji:
     def __init__(self, element):
         self.emoji_id = element.emojiId
@@ -87,6 +95,7 @@ class Emoji:
         if not self.text:
             self.text = emojis.get(self.emoji_id, "未知表情")
         return "[表情]", f"{self.text}-{self.emoji_id}"
+
 
 class Notice:
     def __init__(self, element):
@@ -113,6 +122,7 @@ class Notice:
                      in info2_dict["items"]]
         return "[提示]", " ".join(texts)
 
+
 class Application:
     def __init__(self, element):
         self.raw = element.applicationMessage
@@ -120,6 +130,7 @@ class Application:
 
     def _get_content(self):
         return "[应用消息]", loads(self.raw)["prompt"]
+
 
 class Call:
     def __init__(self, element):
@@ -130,6 +141,7 @@ class Call:
     def _get_content(self):
         return "[通话]", f"{self.status}-{self.text}"
 
+
 class Feed:
     def __init__(self, element):
         self.title = element.feedTitle.text
@@ -138,4 +150,4 @@ class Feed:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) or ''}{('\n' +self.url) or ''}"
+        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) or ''}{('\n' + self.url) or ''}"

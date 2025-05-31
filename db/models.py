@@ -1,17 +1,17 @@
 from sqlalchemy import String, LargeBinary, Text, ForeignKey
-from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
 
+import element_pb2
 from .man import DatabaseManager
 
-import element_pb2
-
-__all__ =  ["C2cMessage", "GroupMessage", "UidMapping", ]
+__all__ = ["C2cMessage", "GroupMessage", "UidMapping", ]
 
 profile_map = {}
 
 Base = declarative_base()
+
 
 class Message():
     id: Mapped[int] = mapped_column("40001", primary_key=True)
@@ -60,8 +60,9 @@ class Message():
         except:
             return elements
 
+
 @DatabaseManager.register_model("nt_msg")
-class C2cMessage(Base,Message):
+class C2cMessage(Base, Message):
     """
     C2c Message Table
     nt_msg.db -> c2c_msg_table
@@ -76,7 +77,7 @@ class C2cMessage(Base,Message):
     UNK_15: Mapped[str] = mapped_column("40090", Text)  # group name card
     UNK_23: Mapped[int] = mapped_column("40100")  # @ status
     UNK_25: Mapped[int] = mapped_column("40060")
-    interlocutor_num: Mapped[int] = mapped_column("40030") # qq num
+    interlocutor_num: Mapped[int] = mapped_column("40030")  # qq num
 
     @property
     def profile_info(self):
@@ -93,8 +94,9 @@ class C2cMessage(Base,Message):
 
     mapping = relationship('UidMapping', back_populates='c2c_messages')
 
+
 @DatabaseManager.register_model("nt_msg")
-class GroupMessage(Base,Message):
+class GroupMessage(Base, Message):
     """
     Group Message Table
     nt_msg.db -> group_msg_table
@@ -110,7 +112,8 @@ class GroupMessage(Base,Message):
 
     @hybrid_property
     def mixed_group_num(self):
-        return self.group_num or  self.group_num2 or  self.group_num3
+        return self.group_num or self.group_num2 or self.group_num3
+
 
 @DatabaseManager.register_model("nt_msg")
 class UidMapping(Base):
@@ -122,7 +125,7 @@ class UidMapping(Base):
 
     id: Mapped[int] = mapped_column("48901", primary_key=True)
     uid: Mapped[str] = mapped_column("48902", String(24), )
-    UNK_02: Mapped[str] = mapped_column("48912",nullable=True)
+    UNK_02: Mapped[str] = mapped_column("48912", nullable=True)
     qq_num: Mapped[int] = mapped_column("1002")
 
     c2c_messages = relationship("C2cMessage", back_populates="mapping")

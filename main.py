@@ -1,11 +1,12 @@
-import logging
 import argparse
+import logging
 from pathlib import Path
+
 from tqdm import tqdm
 
 import db
-from export.txt_exporter import C2cTxtExporter,GroupTxtExporter
 from export.json_exporter import C2cJsonExporter, GroupJsonExporter
+from export.txt_exporter import C2cTxtExporter, GroupTxtExporter
 
 parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
 
@@ -87,6 +88,7 @@ def main():
         run_single("群聊", group_query, group_exporter, group_path)
 
         logging.info(f"成功导出{output_type}格式")
+
 
 if __name__ == '__main__':
     main()

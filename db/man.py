@@ -6,10 +6,11 @@ from sqlalchemy.orm.query import Query
 
 __all__ = ["DatabaseManager"]
 
+
 class DatabaseManager:
     _models = defaultdict(defaultdict)  # {db_id: {table_name: model}}
-    _engines = {}                       # {db_id: engine}
-    _binds = {}                         # {model: engine}
+    _engines = {}  # {db_id: engine}
+    _binds = {}  # {model: engine}
 
     @classmethod
     def register_model(cls, db_id: str) -> callable:
@@ -35,7 +36,6 @@ class DatabaseManager:
         cls._session_factory.configure(binds=cls._binds)
         cls.session = cls._session_factory()
 
-
         return super(DatabaseManager, cls).__new__(cls)
 
     def __init__(self, db_path):
@@ -45,7 +45,7 @@ class DatabaseManager:
         model = self._models["nt_msg"]["nt_uid_mapping_table"]
         return self.session.query(model).filter(model.qq_num == num).first().uid
 
-    def c2c_messages(self,filters) -> Query:
+    def c2c_messages(self, filters) -> Query:
         model = self._models["nt_msg"]["c2c_msg_table"]
         query = self.session.query(model)
         if filters:
@@ -54,7 +54,7 @@ class DatabaseManager:
         else:
             return query.order_by(model.time)
 
-    def group_messages(self,filters) -> Query:
+    def group_messages(self, filters) -> Query:
         model = self._models["nt_msg"]["group_msg_table"]
         query = self.session.query(model)
         return (query.filter(model.mixed_group_num.in_(filters)) if filters else query).order_by(model.time)

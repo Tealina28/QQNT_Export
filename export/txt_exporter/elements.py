@@ -1,8 +1,9 @@
 from ast import literal_eval
-from humanize import naturalsize
 from json import loads
-from unicodedata import category
 from xml.etree.ElementTree import fromstring
+
+from humanize import naturalsize
+from unicodedata import category
 
 from emojis import emojis
 
@@ -62,6 +63,7 @@ class File:
     def _get_content(self):
         return "[文件]", f"{self.file_name} {self.readable_size}"
 
+
 class Emoji:
     def __init__(self, element):
         self.emoji_id = element.emojiId
@@ -98,7 +100,6 @@ class Video:
         self.path = element.videoPath
 
         self.content = self._get_content()
-
 
     def _get_content(self):
         return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
@@ -164,4 +165,4 @@ class Feed:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) or ''}{('\n' +self.url) or ''}"
+        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) or ''}{('\n' + self.url) or ''}"
