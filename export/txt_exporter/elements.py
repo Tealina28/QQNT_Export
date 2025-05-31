@@ -49,7 +49,7 @@ class Image:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[图片]", f"{self.text}{self.file_name} {self.readable_size} {("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
+        return "[图片]", f"{self.text}{self.file_name} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
 
 
 class File:
@@ -86,7 +86,7 @@ class Voice:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[语音]", f"{self.voice_len}″ {self.voice_text} {("\n" + self.file_name) if self.file_name else ""} {self.readable_size if self.readable_size else ""}"
+        return "[语音]", f"{self.voice_len}″ {self.voice_text} {('\n' + self.file_name) or ''} {self.readable_size}"
 
 
 class Video:
@@ -101,7 +101,7 @@ class Video:
 
 
     def _get_content(self):
-        return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {("\n" + self.path) if self.path else ""}"
+        return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
 
 
 class Notice:
@@ -164,4 +164,4 @@ class Feed:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[动态消息]", f"{self.title}{("\n" + self.feed_content) if self.feed_content else ""}{("\n" +self.url) if self.url else ""}"
+        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) or ''}{('\n' +self.url) or ''}"
