@@ -42,8 +42,7 @@ class Image:
     def __init__(self, element):
         self.text = element.imageText
         self.file_name = element.fileName
-        self.file_size = element.fileSize
-        self.readable_size = readable_file_size(self.file_size)
+        self.readable_size = readable_file_size(element.fileSize)
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
@@ -56,8 +55,8 @@ class Image:
 class File:
     def __init__(self, element):
         self.file_name = element.fileName
-        self.file_size = element.fileSize
-        self.readable_size = readable_file_size(self.file_size)
+        self.readable_size = readable_file_size(element.fileSize)
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -82,8 +81,7 @@ class Voice:
         self.voice_text = element.voiceText
         self.voice_len = element.voiceLen
         self.file_name = element.fileName
-        self.file_size = element.fileSize
-        self.readable_size = readable_file_size(self.file_size)
+        self.readable_size = readable_file_size(element.fileSize)
 
         self.content = self._get_content()
 
@@ -93,16 +91,21 @@ class Voice:
 
 class Video:
     def __init__(self, element):
-        self.video_len = element.videoLen
+        self.formated_video_len = self._seconds_to_hms(element.videoLen)
         self.file_name = element.fileName
-        self.file_size = element.fileSize
-        self.readable_size = readable_file_size(self.file_size)
+        self.readable_size = readable_file_size(element.fileSize)
         self.path = element.videoPath
 
         self.content = self._get_content()
 
+    def _seconds_to_hms(self, seconds):
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+
     def _get_content(self):
-        return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
+        return "[视频]", f"{self.formated_video_len} {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
 
 
 class Notice:
