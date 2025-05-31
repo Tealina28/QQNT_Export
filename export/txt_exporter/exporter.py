@@ -40,7 +40,7 @@ class BaseExporter:
             8: Notice,
             10: Application,
             21: Call,
-            22: Feed
+            26: Feed
         }
 
     def _extract(self):
