@@ -1,4 +1,5 @@
 from ast import literal_eval
+from humanize import naturalsize
 from json import loads
 from unicodedata import category
 from xml.etree.ElementTree import fromstring
@@ -30,22 +31,23 @@ class Image:
     def __init__(self, element):
         self.text = element.imageText
         self.file_name = element.fileName
+        self.file_size = element.fileSize
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[图片]", f"{self.text}{self.file_name}{("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
+        return "[图片]", f"{self.text}{self.file_name} {naturalsize(self.file_size,binary=True,format="%.2f")} {("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
 
 class File:
     def __init__(self, element):
         self.file_name = element.fileName
-
+        self.file_size = element.fileSize
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[文件]", self.file_name
+        return "[文件]", f"{self.file_name} {naturalsize(self.file_size,binary=True,format="%.2f")}"
 
 
 class Emoji:
