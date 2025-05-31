@@ -18,6 +18,14 @@ __all__ = [
     "Feed"
 ]
 
+
+def readable_file_size(file_size):
+    """
+    Returns a human-readable file size.
+    """
+    return naturalsize(file_size, binary=True, format="%.2f") if file_size else None
+
+
 class Text:
     def __init__(self, element):
         self.text = element.text
@@ -33,22 +41,25 @@ class Image:
         self.text = element.imageText
         self.file_name = element.fileName
         self.file_size = element.fileSize
+        self.readable_size = readable_file_size(self.file_size)
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[图片]", f"{self.text}{self.file_name} {naturalsize(self.file_size,binary=True,format="%.2f")} {("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
+        return "[图片]", f"{self.text}{self.file_name} {self.readable_size} {("\n" + self.file_path) if  self.file_path else ""}{("\n" + self.file_url) if self.file_url else ""}"
+
 
 class File:
     def __init__(self, element):
         self.file_name = element.fileName
         self.file_size = element.fileSize
+        self.readable_size = readable_file_size(self.file_size)
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[文件]", f"{self.file_name} {naturalsize(self.file_size,binary=True,format="%.2f")}"
+        return "[文件]", f"{self.file_name} {self.readable_size}"
 
 
 class Emoji:
@@ -69,11 +80,12 @@ class Voice:
         self.voice_len = element.voiceLen
         self.file_name = element.fileName
         self.file_size = element.fileSize
+        self.readable_size = readable_file_size(self.file_size)
 
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[语音]", f"{self.voice_len}″ {self.voice_text} {"\n" + self.file_name if self.file_name else ""} {naturalsize(self.file_size,binary=True,format="%.2f") if self.file_size else ""}"
+        return "[语音]", f"{self.voice_len}″ {self.voice_text} {"\n" + self.file_name if self.file_name else ""} {self.readable_size if self.readable_size else ""}"
 
 class Notice:
     def __init__(self, element):
