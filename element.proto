@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-message Elements { repeated Element elements = 40800; }
+message Elements {repeated Element elements = 40800;}
 
 message Element {
   uint64 id = 45001;
@@ -9,6 +9,36 @@ message Element {
   // 8：提示消息（中间灰色），10：应用消息
   // 21：通话段
   // 26：动态消息
+
+
+  // 文本
+  string text = 45101;
+
+
+  // 图片
+
+  string imageUrlLow = 45802;
+  string imageUrlHigh = 45803;
+  string imageUrlOrigin = 45804;
+
+  string imageFilePath = 45812;
+
+  string imageText = 45815;
+
+
+  // 文件
+  string fileName = 45402;
+  uint64 fileSize = 45405;
+
+  uint64 fileTimestamp = 45505; // ?
+
+
+  // 表情消息
+  // 1: QQ 系统表情，2: emoji 表情
+  // https://bot.q.qq.com/wiki/develop/api/openapi/emoji/model.html
+  uint32 emojiId = 47601;
+  string emojiText = 47602;
+
 
   // 引用
   string senderUid = 40020;
@@ -20,34 +50,15 @@ message Element {
 
   Element quotedElement = 47423;
 
-  // 文字
-  string text = 45101;
 
-  // 文件
-  string fileName = 45402; // imageFileName2
-  uint64 fileSize = 45405;
+  // 提示消息
+  string noticeInfo = 48214;
+  string noticeInfo2 = 48271; // ?
 
-  uint64 fileTimestamp = 45505; // ?
-
-  // 图片
-//  string imageFileName = 45102;
-
-  string imageUrlLow = 45802;
-  string imageUrlHigh = 45803;
-  string imageUrlOrigin = 45804;
-
-  string imageFilePath = 45812;
-
-  string imageText = 45815;
-
-  // 表情消息
-  // 1: QQ 系统表情，2: emoji 表情
-  // https://bot.q.qq.com/wiki/develop/api/openapi/emoji/model.html
-  uint32 emojiId = 47601;
-  string emojiText = 47602;
 
   // 应用消息
   string applicationMessage = 47901;
+
 
   // 通话消息
   string callStatus = 48153;
@@ -63,10 +74,6 @@ message Element {
 
   string feedJumpInfo = 48183;
   string feedPublisherUid = 48188;
-
-  // 提示消息
-  string noticeInfo = 48214;
-  string noticeInfo2 = 48271; // ?
 }
 
-message FeedMessage { string text = 48178; }
+message FeedMessage {string text = 48178;}
