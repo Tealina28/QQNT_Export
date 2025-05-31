@@ -34,6 +34,12 @@ message Element {
   uint64 fileTimestamp = 45505; // ?
 
 
+  // 语音消息
+  // 可引用 fileName
+  // 可引用 fileSize
+  string voiceText =45923;
+  uint64 voiceLen = 45906; //单位为秒
+
   // 表情消息
   // 1: QQ 系统表情，2: emoji 表情
   // https://bot.q.qq.com/wiki/develop/api/openapi/emoji/model.html

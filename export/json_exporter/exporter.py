@@ -7,7 +7,6 @@ from .elements import *
 
 __all__ = ["C2cJsonExporter", "GroupJsonExporter"]
 
-
 class ExportManager:
     def __init__(self):
         self.export_queue: dict[Path:list[dict]] = defaultdict(list)
@@ -24,10 +23,8 @@ class ExportManager:
                 indent=2,
             )
 
-
 c2c_manager = ExportManager()
 group_manager = ExportManager()
-
 
 class BaseExporter:
     def __init__(self, message):
@@ -40,6 +37,7 @@ class BaseExporter:
             1: Text,
             2: Image,
             3: File,
+            4: Voice,
             6: Emoji,
             8: Notice,
             10: Application,
@@ -63,7 +61,6 @@ class BaseExporter:
             return result
 
         return None, None
-
 
 class C2cJsonExporter(BaseExporter):
     def __init__(self, message):
@@ -94,7 +91,6 @@ class C2cJsonExporter(BaseExporter):
             "contents": self.contents,
         }
         c2c_manager.add(json_path, msg_dict)
-
 
 class GroupJsonExporter(BaseExporter):
     def __init__(self, message):

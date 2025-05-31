@@ -10,6 +10,7 @@ __all__ = [
     "Text",
     "Image",
     "File",
+    "Voice",
     "Emoji",
     "Notice",
     "Application",
@@ -62,6 +63,17 @@ class Emoji:
             self.text = emojis.get(self.emoji_id, "未知表情")
         return "[表情]", f"{self.text}-{self.emoji_id}"
 
+class Voice:
+    def __init__(self, element):
+        self.voice_text = element.voiceText
+        self.voice_len = element.voiceLen
+        self.file_name = element.fileName
+        self.file_size = element.fileSize
+
+        self.content = self._get_content()
+
+    def _get_content(self):
+        return "[语音]", f"{self.voice_len}″ {self.voice_text} {"\n" + self.file_name if self.file_name else ""} {naturalsize(self.file_size,binary=True,format="%.2f") if self.file_size else ""}"
 
 class Notice:
     def __init__(self, element):
