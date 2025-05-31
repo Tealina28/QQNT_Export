@@ -38,6 +38,7 @@ class BaseExporter:
             2: Image,
             3: File,
             4: Voice,
+            5: Video,
             6: Emoji,
             8: Notice,
             10: Application,

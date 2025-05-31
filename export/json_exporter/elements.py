@@ -11,6 +11,7 @@ __all__ = [
     "Image",
     "File",
     "Voice",
+    "Video",
     "Emoji",
     "Notice",
     "Application",
@@ -40,10 +41,7 @@ class Image:
         self.content = self._get_content()
 
     def _get_content(self):
-        return (
-            "[图片]",
-            f"{self.text}{self.file_name} {self.readable_size or ''}{('\n' + self.file_path) if self.file_path else ''}{('\n' + self.file_url) if self.file_url else ''}"
-        )
+        return "[图片]", f"{self.text}{self.file_name} {self.readable_size} {('\n' + self.file_path) if self.file_path else ''}{('\n' + self.file_url) if self.file_url else ''}"
 
 class File:
     def __init__(self, element):
@@ -53,7 +51,7 @@ class File:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[文件]", f"{self.file_name} {self.readable_size or ''}"
+        return "[文件]", f"{self.file_name} {self.readable_size}"
 
 class Voice:
     def __init__(self, element):
@@ -65,7 +63,19 @@ class Voice:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[语音]", f"{self.voice_len}″ {self.voice_text}{('\n' + self.file_name) if self.file_name else ''} {self.readable_size or ''}"
+        return "[语音]", f"{self.voice_len}″ {self.voice_text} {('\n' + self.file_name) if self.file_name else ''} {self.readable_size if self.readable_size else ''}"
+
+class Video:
+    def __init__(self, element):
+        self.video_len = element.videoLen
+        self.file_name = element.fileName
+        self.file_size = element.fileSize
+        self.readable_size = readable_file_size(self.file_size)
+        self.path = element.videoPath
+        self.content = self._get_content()
+
+    def _get_content(self):
+        return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {('\n' + self.path) if self.path else ''}"
 
 class Emoji:
     def __init__(self, element):
@@ -128,7 +138,4 @@ class Feed:
         self.content = self._get_content()
 
     def _get_content(self):
-        return (
-            "[动态消息]",
-            f"{self.title}{('\n' + self.feed_content) if self.feed_content else ''}{('\n' +self.url) if self.url else ''}"
-        )
+        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) if self.feed_content else ''}{('\n' +self.url) if self.url else ''}"

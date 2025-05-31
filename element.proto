@@ -5,7 +5,7 @@ message Elements {repeated Element elements = 40800;}
 message Element {
   uint64 id = 45001;
   uint32 type = 45002;
-  // 1：文本段，2：图片段，3：文件消息，4:语音消息，6：表情段，7：引用段，
+  // 1：文本段，2：图片段，3：文件消息，4:语音消息，5：视频，6：表情段，7：引用段，
   // 8：提示消息（中间灰色），10：应用消息
   // 21：通话段
   // 26：动态消息
@@ -39,6 +39,16 @@ message Element {
   // 可引用 fileSize
   string voiceText =45923;
   uint64 voiceLen = 45906; //单位为秒
+
+  // 视频
+  // 可引用 fileName
+  // 可引用 fileSize
+  string videoPath = 46403;
+  uint64 videoLen = 45410; //单位为秒
+  uint64 videoWidth = 45411;
+  uint64 videoHeight = 45412;
+  uint64 videoWidth2 = 46413;
+  uint64 videoHeight2 = 46414;
 
   // 表情消息
   // 1: QQ 系统表情，2: emoji 表情

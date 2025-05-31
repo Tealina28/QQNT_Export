@@ -11,6 +11,7 @@ __all__ = [
     "Image",
     "File",
     "Voice",
+    "Video",
     "Emoji",
     "Notice",
     "Application",
@@ -61,7 +62,6 @@ class File:
     def _get_content(self):
         return "[文件]", f"{self.file_name} {self.readable_size}"
 
-
 class Emoji:
     def __init__(self, element):
         self.emoji_id = element.emojiId
@@ -74,6 +74,7 @@ class Emoji:
             self.text = emojis.get(self.emoji_id, "未知表情")
         return "[表情]", f"{self.text}-{self.emoji_id}"
 
+
 class Voice:
     def __init__(self, element):
         self.voice_text = element.voiceText
@@ -85,7 +86,23 @@ class Voice:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[语音]", f"{self.voice_len}″ {self.voice_text} {"\n" + self.file_name if self.file_name else ""} {self.readable_size if self.readable_size else ""}"
+        return "[语音]", f"{self.voice_len}″ {self.voice_text} {("\n" + self.file_name) if self.file_name else ""} {self.readable_size if self.readable_size else ""}"
+
+
+class Video:
+    def __init__(self, element):
+        self.video_len = element.videoLen
+        self.file_name = element.fileName
+        self.file_size = element.fileSize
+        self.readable_size = readable_file_size(self.file_size)
+        self.path = element.videoPath
+
+        self.content = self._get_content()
+
+
+    def _get_content(self):
+        return "[视频]", f"{self.video_len}″ {self.file_name} {self.readable_size} {("\n" + self.path) if self.path else ""}"
+
 
 class Notice:
     def __init__(self, element):
