@@ -15,6 +15,7 @@ __all__ = [
     "Video",
     "Emoji",
     "Notice",
+    "RedPacket",
     "Application",
     "Call",
     "Feed",
@@ -28,6 +29,7 @@ def readable_file_size(file_size):
 class Text:
     def __init__(self, element):
         self.text = element.text
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -41,6 +43,7 @@ class Image:
         self.readable_size = readable_file_size(element.fileSize)
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -51,6 +54,7 @@ class File:
     def __init__(self, element):
         self.file_name = element.fileName
         self.readable_size = readable_file_size(element.fileSize)
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -63,6 +67,7 @@ class Voice:
         self.voice_len = element.voiceLen
         self.file_name = element.fileName
         self.readable_size = readable_file_size(element.fileSize)
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -75,6 +80,7 @@ class Video:
         self.file_name = element.fileName
         self.readable_size = readable_file_size(element.fileSize)
         self.path = element.videoPath
+
         self.content = self._get_content()
 
     def _seconds_to_hms(self, seconds):
@@ -90,6 +96,7 @@ class Emoji:
     def __init__(self, element):
         self.emoji_id = element.emojiId
         self.text = element.emojiText
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -102,6 +109,7 @@ class Notice:
     def __init__(self, element):
         self.info = element.noticeInfo
         self.info2 = element.noticeInfo2
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -124,9 +132,21 @@ class Notice:
         return "[提示]", " ".join(texts)
 
 
+class RedPacket:
+    def __init__(self, element):
+        self.prompt = element.redPacket.prompt
+        self.summary = element.redPacket.summary
+
+        self.content = self._get_content()
+
+    def _get_content(self):
+        return "[红包]", f"{self.summary} {self.prompt}"
+
+
 class Application:
     def __init__(self, element):
         self.raw = element.applicationMessage
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -137,6 +157,7 @@ class Call:
     def __init__(self, element):
         self.status = element.callStatus
         self.text = element.callText
+
         self.content = self._get_content()
 
     def _get_content(self):
@@ -148,6 +169,7 @@ class Feed:
         self.title = element.feedTitle.text
         self.feed_content = element.feedContent.text
         self.url = element.feedUrl
+
         self.content = self._get_content()
 
     def _get_content(self):

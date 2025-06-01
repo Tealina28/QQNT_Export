@@ -38,6 +38,7 @@ class BaseExporter:
             5: Video,
             6: Emoji,
             8: Notice,
+            9: RedPacket,
             10: Application,
             21: Call,
             26: Feed

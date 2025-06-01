@@ -6,7 +6,7 @@ message Element {
   uint64 id = 45001;
   uint32 type = 45002;
   // 1：文本段，2：图片段，3：文件消息，4:语音消息，5：视频，6：表情段，7：引用段，
-  // 8：提示消息（中间灰色），10：应用消息
+  // 8：提示消息（中间灰色），9：红包，10：应用消息
   // 21：通话段
   // 26：动态消息
 
@@ -73,6 +73,10 @@ message Element {
   string noticeInfo2 = 48271; // ?
 
 
+  // 红包
+  RedPacket redPacket = 48403;
+
+
   // 应用消息
   string applicationMessage = 47901;
 
@@ -94,3 +98,10 @@ message Element {
 }
 
 message FeedMessage {string text = 48178;}
+
+message RedPacket {
+  string greeting = 48443;
+  string prompt = 48444;
+  string redPacketType = 48445;
+  string summary = 48448;
+}

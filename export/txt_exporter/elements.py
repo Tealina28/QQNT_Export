@@ -15,6 +15,7 @@ __all__ = [
     "Video",
     "Emoji",
     "Notice",
+    "RedPacket",
     "Application",
     "Call",
     "Feed"
@@ -136,6 +137,17 @@ class Notice:
                      in info2_dict["items"]]
 
         return "[提示]", " ".join(texts)
+
+
+class RedPacket:
+    def __init__(self, element):
+        self.prompt = element.redPacket.prompt
+        self.summary = element.redPacket.summary
+
+        self.content = self._get_content()
+
+    def _get_content(self):
+        return "[红包]", f"{self.summary} {self.prompt}"
 
 
 class Application:
