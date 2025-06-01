@@ -47,10 +47,34 @@ class Image:
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
+        self.md5 = element.md5
+        self.byte_md5 = element.byteMd5.hex().upper()
+        self.cache_path = self._get_cache_path()
+
         self.content = self._get_content()
 
+    def _crc64(self, raw_str):
+        _crc64_table = [0] * 256
+        for i in range(256):
+            bf = i
+            for _ in range(8):
+                bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
+            _crc64_table[i] = bf
+        v = -1
+        for char in raw_str:
+            value = _crc64_table[(ord(char) ^ v) & 255] ^ v >> 8
+        return value
+
+    def _get_cache_path(self):
+        raw_str = f"chatimg:{self.md5 or self.byte_md5 or self.file_name[:32]}"
+        crc64 = self._crc64(raw_str)
+        file_name = f"Cache_{hex(crc64)[2:]}"
+        path = file_name[-3:]
+
+        return f"/chatimg/{path}/{file_name}"
+
     def _get_content(self):
-        return "[图片]", f"{self.text}{self.file_name} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
+        return "[图片]", f"{self.text}{self.cache_path} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
 
 
 class File:
@@ -62,19 +86,6 @@ class File:
 
     def _get_content(self):
         return "[文件]", f"{self.file_name} {self.readable_size}"
-
-
-class Emoji:
-    def __init__(self, element):
-        self.emoji_id = element.emojiId
-        self.text = element.emojiText
-
-        self.content = self._get_content()
-
-    def _get_content(self):
-        if not self.text:
-            self.text = emojis.get(self.emoji_id, "未知表情")
-        return "[表情]", f"{self.text}-{self.emoji_id}"
 
 
 class Voice:
@@ -107,6 +118,19 @@ class Video:
 
     def _get_content(self):
         return "[视频]", f"{self.formated_video_len} {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
+
+
+class Emoji:
+    def __init__(self, element):
+        self.emoji_id = element.emojiId
+        self.text = element.emojiText
+
+        self.content = self._get_content()
+
+    def _get_content(self):
+        if not self.text:
+            self.text = emojis.get(self.emoji_id, "未知表情")
+        return "[表情]", f"{self.text}-{self.emoji_id}"
 
 
 class Notice:
