@@ -18,8 +18,9 @@ message Element {
   // 图片
   // 可引用fileName
   // 可引用fileSize
-  bytes byteMd5 = 45406; // 小写
-  string md5 = 45424;
+  bytes md5HexStr = 45406; // 小写
+  uint64 original = 45418; // 0 false, 1 true
+  string originImageMd5 = 45424;
 
   string imageUrlLow = 45802;
   string imageUrlHigh = 45803;
