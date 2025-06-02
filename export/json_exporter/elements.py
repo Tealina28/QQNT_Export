@@ -1,5 +1,6 @@
 from ast import literal_eval
 from json import loads
+from functools import lru_cache
 from xml.etree.ElementTree import fromstring
 
 from humanize import naturalsize
@@ -23,7 +24,36 @@ __all__ = [
 
 
 def readable_file_size(file_size):
+    """
+    Returns a human-readable file size.
+    """
     return naturalsize(file_size, binary=True, format="%.2f") if file_size else None
+
+
+def get_crc64(raw_str):
+    _crc64_table = [0] * 256
+    for i in range(256):
+        bf = i
+        for _ in range(8):
+            bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
+        _crc64_table[i] = bf
+    v = -1
+    for char in raw_str:
+        value = _crc64_table[(ord(char) ^ v) & 255] ^ v >> 8
+    return value
+
+
+@lru_cache(maxsize=1024)
+def get_cached_img_path(
+    is_original: bool,
+    md5HexStr: str,
+):
+    folder = "chatraw" if is_original else "chatimg"
+    raw_str = f"{folder}:{md5HexStr}"
+    crc64 = get_crc64(raw_str)
+    file_name = f"Cache_{crc64:x}"
+
+    return f"/{folder}/{file_name[-3:]}/{file_name}"
 
 
 class Text:
@@ -50,25 +80,28 @@ class Image:
 
         self.content = self._get_content()
 
-    def _crc64(self, raw_str):
-        _crc64_table = [0] * 256
-        for i in range(256):
-            bf = i
-            for _ in range(8):
-                bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
-            _crc64_table[i] = bf
-        v = -1
-        for char in raw_str:
-            value = _crc64_table[(ord(char) ^ v) & 255] ^ v >> 8
-        return value
+    # def _crc64(self, raw_str):
+    #     # 弃用此方法
+    #     _crc64_table = [0] * 256
+    #     for i in range(256):
+    #         bf = i
+    #         for _ in range(8):
+    #             bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
+    #         _crc64_table[i] = bf
+    #     v = -1
+    #     for char in raw_str:
+    #         value = _crc64_table[(ord(char) ^ v) & 255] ^ v >> 8
+    #     return value
 
     def _get_cache_path(self):
-        folder = "chatraw" if self.original else "chatimg"
-        raw_str = f"{folder}:{self.md5HexStr}"
-        crc64 = self._crc64(raw_str)
-        file_name = f"Cache_{crc64:x}"
+        return get_cached_img_path(self.original, self.md5HexStr)
+        # 与以下实现效果相同
+        # folder = "chatraw" if self.original else "chatimg"
+        # raw_str = f"{folder}:{self.md5HexStr}"
+        # crc64 = self._crc64(raw_str)
+        # file_name = f"Cache_{crc64:x}"
 
-        return f"/{folder}/{file_name[-3:]}/{file_name}"
+        # return f"/{folder}/{file_name[-3:]}/{file_name}"
 
     def _get_content(self):
         return "[图片]", f"{self.text}{self.cache_path} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
