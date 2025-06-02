@@ -98,10 +98,14 @@ class Image:
         crc64_value = crc64(raw_str)
         file_name = f"Cache_{crc64_value:x}"
 
-        # return f"/{folder}/{file_name[-3:]}/{file_name}"
+        return f"/{folder}/{file_name[-3:]}/{file_name}"
 
     def _get_content(self):
-        return "[图片]", f"{self.text}{self.cache_path} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
+        return (
+            "[图片]",
+            f"{self.text}{self.cache_path} {self.readable_size} {('\n' + self.file_path) if self.file_path else ''}\
+{('\n' + self.file_url) if self.file_url else ''}",
+        )
 
 
 class File:
