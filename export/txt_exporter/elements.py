@@ -47,7 +47,7 @@ class Image:
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
-        self.cache_path = self._get_cache_path(element.original, element.md5HexStr)
+        self.cache_path = self._get_cache_path(element.original, element.md5HexStr.hex().upper())
 
         self.content = self._get_content()
 
@@ -66,7 +66,9 @@ class Image:
                 value = _crc64_table[(ord(char) ^ value) & 255] ^ value >> 8
             return value
 
-        folder = "chatraw" if original else "chatimg"
+        # original == 0 指未发原图，图片存于chatraw
+        # original == 1 指发送原图，压缩后的图片存于chatimg,下载后原图存于chatraw
+        folder = "chatimg" if original else "chatraw"
         raw_str = f"{folder}:{md5HexStr}"
         crc64_value = crc64(raw_str)
         file_name = f"Cache_{crc64_value:x}"

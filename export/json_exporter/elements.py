@@ -1,4 +1,5 @@
 from ast import literal_eval
+from functools import lru_cache
 from json import loads
 from xml.etree.ElementTree import fromstring
 
@@ -44,29 +45,29 @@ class Image:
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
-        self.original = element.original
-        self.md5HexStr = element.md5HexStr.hex().upper()
-        self.cache_path = self._get_cache_path()
+        self.cache_path = self._get_cache_path(element.original, element.md5HexStr.hex().upper())
 
         self.content = self._get_content()
 
-    def _crc64(self, raw_str):
-        _crc64_table = [0] * 256
-        for i in range(256):
-            bf = i
-            for _ in range(8):
-                bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
-            _crc64_table[i] = bf
-        v = -1
-        for char in raw_str:
-            value = _crc64_table[(ord(char) ^ v) & 255] ^ v >> 8
-        return value
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def _get_cache_path(original, md5HexStr):
+        def crc64(raw_str):
+            _crc64_table = [0] * 256
+            for i in range(256):
+                bf = i
+                for _ in range(8):
+                    bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
+                _crc64_table[i] = bf
+            value = -1
+            for char in raw_str:
+                value = _crc64_table[(ord(char) ^ value) & 255] ^ value >> 8
+            return value
 
-    def _get_cache_path(self):
-        folder = "chatraw" if self.original else "chatimg"
-        raw_str = f"{folder}:{self.md5HexStr}"
-        crc64 = self._crc64(raw_str)
-        file_name = f"Cache_{crc64:x}"
+        folder = "chatimg" if original else "chatraw"
+        raw_str = f"{folder}:{md5HexStr}"
+        crc64_value = crc64(raw_str)
+        file_name = f"Cache_{crc64_value:x}"
 
         return f"/{folder}/{file_name[-3:]}/{file_name}"
 
