@@ -76,7 +76,13 @@ class Image:
         return f"/{folder}/{file_name[-3:]}/{file_name}"
 
     def _get_content(self):
-        return "[图片]", f"{self.text}{self.cache_path} {self.readable_size} {('\n' + self.file_path) or ''}{('\n' + self.file_url) or ''}"
+        return "[图片]", "\n".join(
+            part for part in [
+                f"{self.text}{self.cache_path} {self.readable_size}",
+                self.file_path,
+                self.file_url
+            ] if part
+        )
 
 
 class File:
@@ -100,7 +106,13 @@ class Voice:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[语音]", f"{self.voice_len}″ {self.voice_text} {('\n' + self.file_name) or ''} {self.readable_size}"
+        return "[语音]", "\n".join(
+            part for part in [
+                f"{self.voice_len}″ {self.voice_text}",
+                self.file_name,
+                self.readable_size
+            ] if part
+        )
 
 
 class Video:
@@ -119,7 +131,12 @@ class Video:
         return f"{hours:02}:{minutes:02}:{seconds:02}"
 
     def _get_content(self):
-        return "[视频]", f"{self.formated_video_len} {self.file_name} {self.readable_size} {('\n' + self.path) or ''}"
+        return "[视频]", "\n".join(
+            part for part in [
+                f"{self.formated_video_len} {self.file_name} {self.readable_size}",
+                self.path
+            ] if part
+        )
 
 
 class Emoji:
@@ -206,4 +223,10 @@ class Feed:
         self.content = self._get_content()
 
     def _get_content(self):
-        return "[动态消息]", f"{self.title}{('\n' + self.feed_content) or ''}{('\n' + self.url) or ''}"
+        return "[动态消息]", "\n".join(
+            part for part in [
+                self.title,
+                self.feed_content,
+                self.url
+            ] if part
+        )
