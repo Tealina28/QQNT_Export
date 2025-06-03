@@ -3,7 +3,7 @@ from datetime import datetime
 from json import dump
 from pathlib import Path
 
-from .elements import *
+from export.txt_exporter.elements import *
 
 __all__ = ["C2cJsonExporter", "GroupJsonExporter"]
 

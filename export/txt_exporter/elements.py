@@ -19,7 +19,7 @@ __all__ = [
     "RedPacket",
     "Application",
     "Call",
-    "Feed"
+    "Feed",
 ]
 
 
@@ -28,6 +28,7 @@ def readable_file_size(file_size):
     Returns a human-readable file size.
     """
     return naturalsize(file_size, binary=True, format="%.2f") if file_size else None
+
 
 class Text:
     def __init__(self, element):
@@ -53,7 +54,7 @@ class Image:
 
     @staticmethod
     @lru_cache(maxsize=4096)
-    def _get_cache_path(original,md5HexStr):
+    def _get_cache_path(original, md5HexStr):
         def crc64(raw_str):
             _crc64_table = [0] * 256
             for i in range(256):
