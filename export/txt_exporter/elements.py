@@ -125,7 +125,8 @@ class Video:
 
         self.content = self._get_content()
 
-    def _seconds_to_hms(self, seconds):
+    @staticmethod
+    def _seconds_to_hms(seconds):
         hours, remainder = divmod(seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
 
