@@ -56,7 +56,7 @@ message Element {
 
   // 表情消息
   // 1: QQ 系统表情，2: emoji 表情
-  // https://bot.q.qq.com/wiki/develop/api/openapi/emoji/model.html
+  // https://bot.q.qq.com/wiki/develop/api-v2/openapi/emoji/model.html
   uint32 emojiId = 47601;
   string emojiText = 47602;
 
