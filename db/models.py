@@ -2,6 +2,7 @@ from sqlalchemy import String, LargeBinary, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
+from sqlalchemy.sql.functions import grouping_sets
 
 import element_pb2
 from .man import DatabaseManager
@@ -9,6 +10,7 @@ from .man import DatabaseManager
 __all__ = ["C2cMessage", "GroupMessage", "UidMapping", ]
 
 profile_map = {}
+group_map = {}
 
 Base = declarative_base()
 
@@ -102,7 +104,6 @@ class GroupMessage(Base, Message):
     nt_msg.db -> group_msg_table
     """
     __tablename__ = "group_msg_table"
-
     group_num: Mapped[str] = mapped_column("40021", String(24))
     group_num2: Mapped[int] = mapped_column("40027")
     group_name_card: Mapped[str] = mapped_column("40090", Text)  # group name card
@@ -113,6 +114,19 @@ class GroupMessage(Base, Message):
     @hybrid_property
     def mixed_group_num(self):
         return self.group_num or self.group_num2 or self.group_num3
+
+    @property
+    def group_info(self):
+        if self.mixed_group_num in group_map:
+            return group_map[self.mixed_group_num]
+        query_result = (
+            object_session(self)
+            .query(GroupList)
+            .filter(GroupList.group_number == self.mixed_group_num)
+            .first()
+        )
+        group_map[self.mixed_group_num] = query_result
+        return query_result
 
 
 @DatabaseManager.register_model("nt_msg")
@@ -181,3 +195,63 @@ class ProfileInfo(Base):
     UNK_41: Mapped[bytes] = mapped_column("24105")
     UNK_42: Mapped[int] = mapped_column("24110")
     UNK_43: Mapped[int] = mapped_column("24111")
+
+@DatabaseManager.register_model("group_info")
+class GroupList(Base):
+    """
+    群列表
+    group_info.db -> group_list
+    """
+    __tablename__ = "group_list"
+    group_number: Mapped[int] = mapped_column("60001", primary_key=True)
+    UNK_02: Mapped[int] = mapped_column("60221")
+    create_time: Mapped[int] = mapped_column("60004")
+    max_member: Mapped[int] = mapped_column("60005")
+    member_count: Mapped[int] = mapped_column("60006")
+    name: Mapped[str] = mapped_column("60007")
+    UNK_07: Mapped[int] = mapped_column("60008")
+    UNK_08: Mapped[int] = mapped_column("60009")
+    UNK_09: Mapped[int] = mapped_column("60020")
+    UNK_10: Mapped[int] = mapped_column("60011")
+    UNK_11: Mapped[int] = mapped_column("60010")
+    UNK_12: Mapped[int] = mapped_column("60017")
+    UNK_13: Mapped[int] = mapped_column("60018")
+    remark: Mapped[str] = mapped_column("60026")
+    UNK_15: Mapped[int] = mapped_column("60022")
+    UNK_16: Mapped[int] = mapped_column("60023")
+    UNK_17: Mapped[int] = mapped_column("60027")
+    UNK_18: Mapped[int] = mapped_column("60028")
+    UNK_19: Mapped[int] = mapped_column("60029")
+    UNK_20: Mapped[int] = mapped_column("60030")
+    UNK_21: Mapped[int] = mapped_column("60031")
+    UNK_22: Mapped[int] = mapped_column("60269")
+    UNK_23: Mapped[int] = mapped_column("60012")
+    UNK_24: Mapped[int] = mapped_column("60034")
+    UNK_25: Mapped[int] = mapped_column("60035")
+    UNK_26: Mapped[int] = mapped_column("60036")
+    UNK_27: Mapped[int] = mapped_column("60037")
+    UNK_28: Mapped[int] = mapped_column("60038")
+    UNK_29: Mapped[int] = mapped_column("60204")
+    UNK_30: Mapped[int] = mapped_column("60238")
+    UNK_31: Mapped[int] = mapped_column("60258")
+    UNK_32: Mapped[int] = mapped_column("60277")
+    UNK_33: Mapped[bytes] = mapped_column("60040")
+    UNK_34: Mapped[int] = mapped_column("60206")
+    UNK_35: Mapped[int] = mapped_column("60255")
+    UNK_36: Mapped[int] = mapped_column("60256")
+    UNK_37: Mapped[int] = mapped_column("60279")
+    UNK_38: Mapped[int] = mapped_column("60280")
+    UNK_39: Mapped[int] = mapped_column("60281")
+    UNK_40: Mapped[int] = mapped_column("60299")
+    latest_bulletin: Mapped[bytes] = mapped_column("60216")
+    UNK_42: Mapped[int] = mapped_column("60310")
+    UNK_43: Mapped[int] = mapped_column("60259")
+    UNK_44: Mapped[int] = mapped_column("60304")
+    UNK_45: Mapped[str] = mapped_column("60267")
+    UNK_46: Mapped[int] = mapped_column("60294")
+    UNK_47: Mapped[int] = mapped_column("60295")
+    UNK_48: Mapped[int] = mapped_column("60250")
+    UNK_49: Mapped[int] = mapped_column("60262")
+    UNK_50: Mapped[int] = mapped_column("60298")
+    UNK_51: Mapped[int] = mapped_column("60252")
+    UNK_52: Mapped[int] = mapped_column("60344")

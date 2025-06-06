@@ -102,7 +102,13 @@ class GroupTxtExporter(BaseExporter):
 
     def write(self, output_path):
         self._extract()
-        txt_path = output_path / f"{self.message.mixed_group_num}.txt"
+
+        if self.message.group_info:
+            file_name = self.message.group_info.remark or self.message.group_info.name
+        else:
+            file_name = self.message.mixed_group_num
+
+        txt_path = output_path / f"{file_name}.txt"
         content_str = f"""{self.readable_time} {self.message.group_name_card or self.message.nickname or self.message.sender_num}\n"""
 
         for content in self.contents:

@@ -105,7 +105,13 @@ class GroupJsonExporter(BaseExporter):
 
     def write(self, output_path: Path):
         self._extract()
-        json_path = output_path / f"{self.message.mixed_group_num}.json"
+
+        if self.message.group_info:
+            file_name = self.message.group_info.remark or self.message.group_info.name
+        else:
+            file_name = self.message.mixed_group_num
+
+        json_path = output_path / f"{file_name}.json"
 
         msg_dict = {
             "time": self.readable_time,
