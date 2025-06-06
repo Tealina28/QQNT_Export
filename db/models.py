@@ -1,8 +1,9 @@
+from collections import defaultdict
+
 from sqlalchemy import String, LargeBinary, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
-from sqlalchemy.sql.functions import grouping_sets
 
 import element_pb2
 from .man import DatabaseManager
@@ -11,6 +12,7 @@ __all__ = ["C2cMessage", "GroupMessage", "UidMapping", ]
 
 profile_map = {}
 group_map = {}
+member_map = defaultdict(dict)
 
 Base = declarative_base()
 
@@ -126,6 +128,21 @@ class GroupMessage(Base, Message):
             .first()
         )
         group_map[self.mixed_group_num] = query_result
+        return query_result
+
+    @property
+    def sender_profile(self):
+        if self.sender_uid in member_map:
+            if self.mixed_group_num in member_map[self.sender_uid]:
+                return member_map[self.sender_uid][self.mixed_group_num]
+        query_result = (
+            object_session(self)
+            .query(GroupMember)
+            .filter(GroupMember.uid == self.sender_uid)
+            .filter(GroupMember.group_number == self.mixed_group_num)
+            .first()
+        )
+        member_map[self.sender_uid][self.mixed_group_num] = query_result
         return query_result
 
 
@@ -255,3 +272,48 @@ class GroupList(Base):
     UNK_50: Mapped[int] = mapped_column("60298")
     UNK_51: Mapped[int] = mapped_column("60252")
     UNK_52: Mapped[int] = mapped_column("60344")
+
+
+@DatabaseManager.register_model("group_info")
+class GroupMember(Base):
+    """
+    群成员
+    group_info.db -> group_member3
+    """
+    __tablename__ = "group_member3"
+    group_name_card: Mapped[str] = mapped_column("64003")
+    nickname: Mapped[str] = mapped_column("20002")
+    group_number: Mapped[int] = mapped_column("60001", primary_key=True)
+    uid: Mapped[str] = mapped_column("1000", primary_key=True)
+    UNK_05: Mapped[str] = mapped_column("1001")
+    qq_num: Mapped[int] = mapped_column("1002")
+    UNK_07: Mapped[int] = mapped_column("64002")
+    UNK_08: Mapped[bytes] = mapped_column("64004")
+    UNK_09: Mapped[int] = mapped_column("64005")
+    UNK_10: Mapped[int] = mapped_column("64006")
+    join_time: Mapped[int] = mapped_column("64007")
+    lastest_message_time: Mapped[int] = mapped_column("64008")
+    lastest_ban_ends: Mapped[int] = mapped_column("64009")
+    manager_flag: Mapped[int] = mapped_column("64010") #0 for False, 1 for True
+    UNK_15: Mapped[int] = mapped_column("64011")
+    UNK_16: Mapped[int] = mapped_column("64012")
+    UNK_17: Mapped[int] = mapped_column("64013")
+    UNK_18: Mapped[int] = mapped_column("64017")
+    UNK_19: Mapped[int] = mapped_column("64015")
+    status: Mapped[int] = mapped_column("64016") # 0 for in, 1 for exited
+    UNK_21: Mapped[int] = mapped_column("64018")
+    UNK_22: Mapped[int] = mapped_column("64034")
+    UNK_23: Mapped[int] = mapped_column("64020")
+    UNK_24: Mapped[int] = mapped_column("64021")
+    UNK_25: Mapped[int] = mapped_column("64022")
+    custom_badge: Mapped[str] = mapped_column("64023")
+    UNK_27: Mapped[int] = mapped_column("64024")
+    UNK_28: Mapped[int] = mapped_column("64025")
+    UNK_29: Mapped[int] = mapped_column("64026")
+    UNK_30: Mapped[int] = mapped_column("64027")
+    UNK_31: Mapped[int] = mapped_column("64028")
+    UNK_32: Mapped[str] = mapped_column("64029")
+    UNK_33: Mapped[int] = mapped_column("64030")
+    UNK_34: Mapped[int] = mapped_column("64031")
+    UNK_35: Mapped[int] = mapped_column("64032")
+    level: Mapped[int] = mapped_column("64035")

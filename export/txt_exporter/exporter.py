@@ -108,8 +108,17 @@ class GroupTxtExporter(BaseExporter):
         else:
             file_name = self.message.mixed_group_num
 
+        if self.message.group_name_card:
+            display_identity = self.message.group_name_card
+        elif self.message.nickname:
+            display_identity = self.message.nickname
+        elif self.message.sender_profile:
+            display_identity = self.message.sender_profile.group_name_card or self.message.sender_profile.nickname or self.message.sender_profile.qq_num
+        else:
+            display_identity = self.message.sender_num
+
         txt_path = output_path / f"{file_name}.txt"
-        content_str = f"""{self.readable_time} {self.message.group_name_card or self.message.nickname or self.message.sender_num}\n"""
+        content_str = f"""{self.readable_time} {display_identity}\n"""
 
         for content in self.contents:
             content_str += f"{content[0]}\n{content[1]}\n"
