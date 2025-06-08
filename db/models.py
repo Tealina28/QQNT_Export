@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
 import element_pb2
 from .man import DatabaseManager
 
-__all__ = ["C2cMessage", "GroupMessage", "UidMapping", ]
+__all__ = ["C2cMessage", "GroupMessage", "UidMapping", "ProfileInfo", "GroupList", "GroupMember"]
 
 profile_map = {}
 group_map = {}
