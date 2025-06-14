@@ -1,3 +1,4 @@
+from atexit import register
 from collections import defaultdict
 from datetime import datetime
 from json import dump
@@ -11,11 +12,12 @@ __all__ = ["C2cJsonExporter", "GroupJsonExporter"]
 class ExportManager:
     def __init__(self):
         self.export_queue: dict[Path:list[dict]] = defaultdict(list)
+        register(self.save)
 
     def add(self, path: Path, content: dict):
         self.export_queue[path].append(content)
 
-    def __del__(self):
+    def save(self):
         for path in self.export_queue:
             dump(
                 self.export_queue[path],

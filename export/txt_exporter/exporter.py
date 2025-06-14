@@ -1,3 +1,4 @@
+from atexit import register
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -10,11 +11,12 @@ __all__ = ["C2cTxtExporter", "GroupTxtExporter"]
 class ExportManager:
     def __init__(self):
         self.export_queue: dict[Path:list] = defaultdict(list)
+        register(self.save)
 
     def add(self, path: Path, content: str):
         self.export_queue[path].append(content)
 
-    def __del__(self):
+    def save(self):
         for path in self.export_queue:
             with path.open(mode="w+", encoding="utf-8") as f:
                 for content in self.export_queue[path]:
