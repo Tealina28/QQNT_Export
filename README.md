@@ -35,27 +35,13 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 
 ### 使用
 
-    usage: main.py [-h] [--c2c [C2C ...]] [--group [GROUP ...]] [--output_path OUTPUT_PATH] [--output_types {txt,json} [{txt,json} ...]] path
-    
-    读取并导出解密后的QQNT数据库中的聊天记录
-    
-    positional arguments:
-      path                  解密后的数据库目录路径
-    
-    options:
-      -h, --help            show this help message and exit
-      --c2c [C2C ...]       需要输出的私聊消息的QQ号列表，默认导出全部
-      --group [GROUP ...]   需要输出的群聊消息的群号列表，默认导出全部
-      --output_path OUTPUT_PATH
-                            导出的路径，默认为数据库上级目录
-      --output_types, -o {txt,json} [{txt,json} ...]
-                            需要导出的文件格式，默认txt
+创建`.toml`文件，并按照仓库中`example.toml`的格式修改配置。使用时传入该`.toml`文件的路径作为唯一参数即可。
 
-示例：`python main.py --c2c 123456789 987654321 --group 12345678 .\databases\ --output_path .\output\ -o json`
+示例：`python main.py .\example.toml`
 
-默认导出全部（留空）。
+> 对于之前版本，仍可使用`python main.py --help`查看帮助信息。
 
-若一切正常，你应该看到在`path`的上级目录生成了`output`目录，目录中对于每个私聊对象和群聊生成了一个`.txt`文件（不知道`0.txt和None.txt`是怎么回事）。
+若一切正常，你应该看到在生成了`output`目录，目录中对于每个私聊对象和群聊生成了一个`.txt`或`.json`文件。
 
 ## 关于
 
