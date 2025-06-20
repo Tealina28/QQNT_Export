@@ -5,17 +5,19 @@ from pathlib import Path
 from tqdm import tqdm
 
 import db
+from export import base_elements
 from export.json_exporter import C2cJsonExporter, GroupJsonExporter
 from export.txt_exporter import C2cTxtExporter, GroupTxtExporter
 
 parser = argparse.ArgumentParser(description="读取并导出解密后的QQNT数据库中的聊天记录")
 
-parser.add_argument("path", type=str, help="解密后的数据库目录路径")
+parser.add_argument("db_path", type=str, help="解密后的数据库目录路径")
 parser.add_argument("--c2c", nargs="*", type=int, help="需要输出的私聊消息的QQ号列表，默认导出全部")
 parser.add_argument("--group", nargs="*", type=int, help="需要输出的群聊消息的群号列表，默认导出全部")
 parser.add_argument(
     "--output_path", type=str, default=None, help="导出的路径，默认为数据库上级目录"
 )
+parser.add_argument("--pic_path", type=str, default="", help="chatpic目录路径，默认为空")
 parser.add_argument(
     "--output_types",
     "-o",
@@ -24,6 +26,7 @@ parser.add_argument(
     choices=["txt", "json"],
     help="需要导出的文件格式，默认txt",
 )
+
 
 logging.basicConfig(
     level=logging.INFO,  # 设置默认日志级别
@@ -63,7 +66,9 @@ def run_single(task_type, query, Exporter, path):
 
 def main():
     args = parser.parse_args()
-    db_path = Path(args.path)
+    pic_path = Path(args.pic_path)
+    base_elements.pic_path = pic_path
+    db_path = Path(args.db_path)
 
     if args.output_path is None:
         args.output_path = Path(db_path / "..")

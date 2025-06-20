@@ -7,6 +7,8 @@ from unicodedata import category
 
 from emojis import emojis
 
+pic_path = ""
+
 __all__ = [
     "BaseText",
     "BaseImage",
@@ -47,13 +49,13 @@ class BaseImage:
         self.file_path = element.imageFilePath
         self.file_url = element.imageUrlOrigin
 
-        self.cache_path = self._get_cache_path(element.original, element.md5HexStr.hex().upper())
+        self.cache_path = self._get_cache_path(element.original, element.md5HexStr.hex().upper(),pic_path)
 
         self.content = self._get_content()
 
     @staticmethod
     @lru_cache(maxsize=4096)
-    def _get_cache_path(original, md5HexStr):
+    def _get_cache_path(original, md5HexStr, pic_path):
         def crc64(raw_str):
             _crc64_table = [0] * 256
             for i in range(256):
@@ -73,7 +75,7 @@ class BaseImage:
         crc64_value = crc64(raw_str)
         file_name = f"Cache_{crc64_value:x}"
 
-        return f"/{folder}/{file_name[-3:]}/{file_name}"
+        return pic_path / folder/ file_name[-3:] / file_name
 
     def _get_content(self):
         pass
