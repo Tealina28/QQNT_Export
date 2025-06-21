@@ -5,7 +5,7 @@ from pathlib import Path
 from json import dump
 from tqdm import tqdm
 
-from export.txt_exporter.elements import *
+from exporter.txt.elements import *
 
 __all__ = ["JsonExportManager"]
 

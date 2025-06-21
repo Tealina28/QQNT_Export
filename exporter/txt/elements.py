@@ -1,4 +1,4 @@
-from export.base_elements import *
+from exporter.base_elements import *
 
 from json import loads
 
