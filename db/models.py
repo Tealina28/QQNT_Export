@@ -83,21 +83,7 @@ class C2cMessage(Base, Message):
     UNK_25: Mapped[int] = mapped_column("40060")
     interlocutor_num: Mapped[int] = mapped_column("40030")  # qq num
 
-    @property
-    def profile_info(self):
-        if self.interlocutor_uid in profile_map:
-            return profile_map[self.interlocutor_uid]
-        query_result = (
-            object_session(self)
-            .query(ProfileInfo)
-            .filter(ProfileInfo.uid == self.interlocutor_uid)
-            .first()
-        )
-        profile_map[self.interlocutor_uid] = query_result
-        return query_result
-
     mapping = relationship('UidMapping', back_populates='c2c_messages')
-
 
 @DatabaseManager.register_model("nt_msg")
 class GroupMessage(Base, Message):
@@ -118,19 +104,6 @@ class GroupMessage(Base, Message):
         return self.group_num or self.group_num2 or self.group_num3
 
     @property
-    def group_info(self):
-        if self.mixed_group_num in group_map:
-            return group_map[self.mixed_group_num]
-        query_result = (
-            object_session(self)
-            .query(GroupList)
-            .filter(GroupList.group_number == self.mixed_group_num)
-            .first()
-        )
-        group_map[self.mixed_group_num] = query_result
-        return query_result
-
-    @property
     def sender_profile(self):
         if self.sender_uid in member_map:
             if self.mixed_group_num in member_map[self.sender_uid]:
@@ -144,7 +117,6 @@ class GroupMessage(Base, Message):
         )
         member_map[self.sender_uid][self.mixed_group_num] = query_result
         return query_result
-
 
 @DatabaseManager.register_model("nt_msg")
 class UidMapping(Base):

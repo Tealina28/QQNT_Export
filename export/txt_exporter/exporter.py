@@ -2,18 +2,48 @@ from atexit import register
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from tqdm import tqdm
 
 from .elements import *
 
-__all__ = ["C2cTxtExporter", "GroupTxtExporter"]
+__all__ = ["TxtExportManager"]
 
 
-class ExportManager:
-    def __init__(self):
+class TxtExportManager:
+    def __init__(self,dbman,queries, output_path, task_type):
+
         self.export_queue: dict[Path:list] = defaultdict(list)
+        self.dbman = dbman
+        self.queries = queries
+        self.output_path = output_path
+        self.task_type = task_type
         register(self.save)
 
-    def add(self, path: Path, content: str):
+    def process(self):
+        Exporter = C2cTxtExporter if self.task_type == "c2c" else GroupTxtExporter
+        for interlocutor_uid,query in self.queries.items():
+            if self.task_type == "c2c":
+                profile_info = self.dbman.profile_info(interlocutor_uid)
+                if profile_info:
+                    filename = profile_info.remark or profile_info.nickname
+                elif query.first().mapping:
+                    filename = query.first().mapping.qq_num
+                else:
+                    filename = query.first().interlocutor_num
+            else:
+                group_info = self.dbman.group_info(query.first().mixed_group_num)
+                if group_info:
+                    filename = group_info.remark or group_info.name
+                else:
+                    filename = query.first().mixed_group_num
+
+            txt_path = self.output_path / f"{filename}.txt"
+            for message in tqdm(query.all()):
+                exporter = Exporter(message)
+                self.export_queue[txt_path].append(exporter.content_str)
+
+
+    def add(self, path: Path, content:str):
         self.export_queue[path].append(content)
 
     def save(self):
@@ -21,11 +51,6 @@ class ExportManager:
             with path.open(mode="w+", encoding="utf-8") as f:
                 for content in self.export_queue[path]:
                     f.write(content)
-
-
-c2c_manager = ExportManager()
-group_manager = ExportManager()
-
 
 class BaseExporter:
     def __init__(self, message):
@@ -45,6 +70,7 @@ class BaseExporter:
             21: Call,
             26: Feed
         }
+        self.content_str = self._content_str()
 
     def _extract(self):
         for element in self.message.elements.elements:
@@ -63,52 +89,41 @@ class BaseExporter:
 
         return None, None
 
+    def _content_str(self):
+        pass
 
 class C2cTxtExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
-        if message.sender_flag == 0:
-            self.direction = "收"
-        elif message.sender_flag in (1, 2):
-            self.direction = "发"
-        elif message.sender_flag == 8:
-            self.direction = "转发"
-        else:
-            self.direction = "未知"
 
-    def write(self, output_path):
+
+    def _content_str(self):
         self._extract()
 
-        if self.message.profile_info:
-            filename = self.message.profile_info.remark or self.message.profile_info.nickname
-        elif self.message.mapping:
-            filename = self.message.mapping.qq_num
+        if self.message.sender_flag == 0:
+            direction = "收"
+        elif self.message.sender_flag in (1, 2):
+           direction = "发"
+        elif self.message.sender_flag == 8:
+            direction = "转发"
         else:
-            filename = self.message.interlocutor_num
+            direction = "未知"
 
-        txt_path = output_path / f"{filename}.txt"
-
-        content_str = f"""{self.readable_time} {self.direction}\n"""
+        content_str = f"""{self.readable_time} {direction}\n"""
 
         for content in self.contents:
             content_str += f"{content[0]}\n{content[1]}\n"
 
         content_str += "\n"
 
-        c2c_manager.add(txt_path, content_str)
-
+        return content_str
 
 class GroupTxtExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
 
-    def write(self, output_path):
+    def _content_str(self):
         self._extract()
-
-        if self.message.group_info:
-            file_name = self.message.group_info.remark or self.message.group_info.name
-        else:
-            file_name = self.message.mixed_group_num
 
         if self.message.group_name_card:
             display_identity = self.message.group_name_card
@@ -119,7 +134,6 @@ class GroupTxtExporter(BaseExporter):
         else:
             display_identity = self.message.sender_num
 
-        txt_path = output_path / f"{file_name}.txt"
         content_str = f"""{self.readable_time} {display_identity}\n"""
 
         for content in self.contents:
@@ -127,4 +141,4 @@ class GroupTxtExporter(BaseExporter):
 
         content_str += "\n"
 
-        group_manager.add(txt_path, content_str)
+        return content_str

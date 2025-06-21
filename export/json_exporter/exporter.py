@@ -1,42 +1,60 @@
 from atexit import register
 from collections import defaultdict
 from datetime import datetime
-from json import dump
 from pathlib import Path
+from json import dump
+from tqdm import tqdm
 
 from export.txt_exporter.elements import *
 
-__all__ = ["C2cJsonExporter", "GroupJsonExporter"]
+__all__ = ["JsonExportManager"]
 
 
-class ExportManager:
-    def __init__(self):
-        self.export_queue: dict[Path:list[dict]] = defaultdict(list)
+class JsonExportManager:
+    def __init__(self, dbman, queries, output_path, task_type):
+        self.export_queue: dict[Path, list] = defaultdict(list)
+        self.dbman = dbman
+        self.queries = queries
+        self.output_path = output_path
+        self.task_type = task_type
         register(self.save)
+
+    def process(self):
+        Exporter = C2cJsonExporter if self.task_type == "c2c" else GroupJsonExporter
+        for interlocutor_uid, query in self.queries.items():
+            if self.task_type == "c2c":
+                profile_info = self.dbman.profile_info(interlocutor_uid)
+                if profile_info:
+                    filename = profile_info.remark or profile_info.nickname
+                elif query.first().mapping:
+                    filename = query.first().mapping.qq_num
+                else:
+                    filename = query.first().interlocutor_num
+            else:
+                group_info = self.dbman.group_info(query.first().mixed_group_num)
+                if group_info:
+                    filename = group_info.remark or group_info.name
+                else:
+                    filename = query.first().mixed_group_num
+
+            json_path = self.output_path / f"{filename}.json"
+            for message in tqdm(query.all()):
+                exporter = Exporter(message)
+                self.export_queue[json_path].append(exporter.content_dict)
 
     def add(self, path: Path, content: dict):
         self.export_queue[path].append(content)
 
     def save(self):
         for path in self.export_queue:
-            dump(
-                self.export_queue[path],
-                path.open(mode="w+", encoding="utf-8"),
-                ensure_ascii=False,
-                indent=2,
-            )
-
-
-c2c_manager = ExportManager()
-group_manager = ExportManager()
+            with path.open(mode="w+", encoding="utf-8") as f:
+                dump(self.export_queue[path], f, ensure_ascii=False, indent=2)
 
 
 class BaseExporter:
     def __init__(self, message):
         self.message = message
-        self.readable_time = datetime.fromtimestamp(message.time).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        self.readable_time = datetime.fromtimestamp(message.time).strftime("%Y-%m-%d %H:%M:%S")
         self.contents = []
         self.elements_map = {
             1: Text,
@@ -49,8 +67,9 @@ class BaseExporter:
             9: RedPacket,
             10: Application,
             21: Call,
-            26: Feed,
+            26: Feed
         }
+        self.content_dict = self._content_dict()
 
     def _extract(self):
         for element in self.message.elements.elements:
@@ -66,54 +85,40 @@ class BaseExporter:
             else:
                 result = ("[被引用的消息]", result[1])
             return result
-
         return None, None
+
+    def _content_dict(self):
+        pass
 
 
 class C2cJsonExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
-        if message.sender_flag == 0:
-            self.direction = "收"
-        elif message.sender_flag in (1, 2):
-            self.direction = "发"
-        elif message.sender_flag == 8:
-            self.direction = "转发"
-        else:
-            self.direction = "未知"
 
-    def write(self, output_path: Path):
+    def _content_dict(self):
         self._extract()
-
-        if self.message.profile_info:
-            filename = self.message.profile_info.remark or self.message.profile_info.nickname
-        elif self.message.mapping:
-            filename = self.message.mapping.qq_num
+        if self.message.sender_flag == 0:
+            direction = "收"
+        elif self.message.sender_flag in (1, 2):
+            direction = "发"
+        elif self.message.sender_flag == 8:
+            direction = "转发"
         else:
-            filename = self.message.interlocutor_num
+            direction = "未知"
 
-        json_path = output_path / f"{filename}.json"
-        msg_dict = {
+        return {
             "time": self.readable_time,
-            "direction": self.direction,
+            "direction": direction,
             "contents": self.contents,
         }
-        c2c_manager.add(json_path, msg_dict)
 
 
 class GroupJsonExporter(BaseExporter):
     def __init__(self, message):
         super().__init__(message)
 
-    def write(self, output_path: Path):
+    def _content_dict(self):
         self._extract()
-
-        if self.message.group_info:
-            file_name = self.message.group_info.remark or self.message.group_info.name
-        else:
-            file_name = self.message.mixed_group_num
-
-
         if self.message.group_name_card:
             display_identity = self.message.group_name_card
         elif self.message.nickname:
@@ -123,13 +128,9 @@ class GroupJsonExporter(BaseExporter):
         else:
             display_identity = self.message.sender_num
 
-
-        json_path = output_path / f"{file_name}.json"
-
-        msg_dict = {
+        return {
             "time": self.readable_time,
             "sender": display_identity,
             "sender_qq": self.message.sender_num,
             "contents": self.contents,
         }
-        group_manager.add(json_path, msg_dict)

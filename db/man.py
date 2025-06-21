@@ -43,20 +43,35 @@ class DatabaseManager:
 
     def num_to_uid(self, num: int) -> str:
         model = self._models["nt_msg"]["nt_uid_mapping_table"]
-        return self.session.query(model).filter(model.qq_num == num).first().uid
+        return self.session.query(model).filter_by(qq_num = num).first().uid
 
-    def c2c_messages(self, filters) -> Query:
+    def c2c_messages(self, filters):
         model = self._models["nt_msg"]["c2c_msg_table"]
         query = self.session.query(model)
-        if filters:
-            uids = [self.num_to_uid(num) for num in filters]
-            return query.filter(model.interlocutor_uid.in_(uids)).order_by(model.time)
-        else:
-            return query.order_by(model.time)
+        if not filters:
+            filters = self.session.query(model.interlocutor_uid).distinct().all()
+        uids = [self.num_to_uid(num) for num in filters]
+        queries = {uid: query.filter_by(interlocutor_uid = uid).order_by(model.time) for uid in uids}
 
-    def group_messages(self, filters) -> Query:
+        return queries
+
+
+    def group_messages(self, filters):
         model = self._models["nt_msg"]["group_msg_table"]
         query = self.session.query(model)
-        return (query.filter(model.mixed_group_num.in_(filters)) if filters else query).order_by(model.time)
+        if not filters:
+            filters = self.session.query(model.mixed_group_num).distinct().all()
+        queries = {num: query.filter_by(mixed_group_num = num).order_by(model.time) for num in filters}
+        return queries
+
+    def profile_info(self, uid):
+        model = self._models["profile_info"]["profile_info_v6"]
+        return self.session.query(model).filter_by(uid = uid).first()
+
+    def group_info(self, group_num):
+        model = self._models["group_info"]["group_list"]
+        return self.session.query(model) \
+            .filter_by(group_number = group_num) \
+            .first()
 
 from .models import *
