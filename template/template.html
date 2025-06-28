@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+</head>
+<body>
+
+</body>
+    <h1>{{ title }}</h1>
+
+    {% for message in messages %}
+    <p>
+        {{ message.readable_time }}
+        {{ message.display_identity }} <br />
+        {{ message.content|safe}} <br />
+    </p>
+    {% endfor %}
+
+</html>

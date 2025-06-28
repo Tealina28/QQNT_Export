@@ -8,6 +8,7 @@ import db
 from exporter import base_elements
 from exporter.json import JsonExportManager
 from exporter.txt import TxtExportManager
+from exporter.html import HtmlExportManager
 
 logging.basicConfig(
     level=logging.INFO,  # 设置默认日志级别
@@ -18,6 +19,7 @@ logging.basicConfig(
 exporter_map = {
     "txt": TxtExportManager,
     "json": JsonExportManager,
+    "html": HtmlExportManager
 }
 
 
