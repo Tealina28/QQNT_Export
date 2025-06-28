@@ -42,10 +42,6 @@ class TxtExportManager:
                 exporter = Exporter(message)
                 self.export_queue[txt_path].append(exporter.content_str)
 
-
-    def add(self, path: Path, content:str):
-        self.export_queue[path].append(content)
-
     def save(self):
         for path in self.export_queue:
             with path.open(mode="w+", encoding="utf-8") as f:
