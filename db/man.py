@@ -48,9 +48,11 @@ class DatabaseManager:
     def c2c_messages(self, filters):
         model = self._models["nt_msg"]["c2c_msg_table"]
         query = self.session.query(model)
-        if not filters:
-            filters = self.session.query(model.interlocutor_uid).distinct().all()
-        uids = [self.num_to_uid(num) for num in filters]
+        if filters:
+            uids = [self.num_to_uid(num) for num in filters]
+        else:
+            uids = [row[0] for row in self.session.query(model.interlocutor_uid).distinct().all()]
+
         queries = {uid: query.filter_by(interlocutor_uid = uid).order_by(model.time) for uid in uids}
 
         return queries
@@ -60,7 +62,7 @@ class DatabaseManager:
         model = self._models["nt_msg"]["group_msg_table"]
         query = self.session.query(model)
         if not filters:
-            filters = self.session.query(model.mixed_group_num).distinct().all()
+            filters = [row[0] for row in self.session.query(model.mixed_group_num).distinct().all()]
         queries = {num: query.filter_by(mixed_group_num = num).order_by(model.time) for num in filters}
         return queries
 
