@@ -5,6 +5,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from .elements import *
+from ..__init__ import sanitize_filename
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -39,7 +40,7 @@ class HtmlExportManager:
                 else:
                     filename = query.first().mixed_group_num
 
-            html_path = self.output_path / f"{filename}.html"
+            html_path = self.output_path / f"{sanitize_filename(filename)}.html"
             for message in tqdm(query.all()):
                 exporter = Exporter(message)
                 self.export_queue[html_path].append(exporter.content_dict)

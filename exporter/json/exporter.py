@@ -6,6 +6,7 @@ from json import dump
 from tqdm import tqdm
 
 from exporter.txt.elements import *
+from ..__init__ import sanitize_filename
 
 __all__ = ["JsonExportManager"]
 
@@ -37,7 +38,7 @@ class JsonExportManager:
                 else:
                     filename = query.first().mixed_group_num
 
-            json_path = self.output_path / f"{filename}.json"
+            json_path = self.output_path / f"{sanitize_filename(filename)}.json"
             for message in tqdm(query.all()):
                 exporter = Exporter(message)
                 self.export_queue[json_path].append(exporter.content_dict)

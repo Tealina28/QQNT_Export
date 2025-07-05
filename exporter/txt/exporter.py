@@ -5,6 +5,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from .elements import *
+from ..__init__ import sanitize_filename
 
 __all__ = ["TxtExportManager"]
 
@@ -37,7 +38,7 @@ class TxtExportManager:
                 else:
                     filename = query.first().mixed_group_num
 
-            txt_path = self.output_path / f"{filename}.txt"
+            txt_path = self.output_path / f"{sanitize_filename(filename)}.txt"
             for message in tqdm(query.all()):
                 exporter = Exporter(message)
                 self.export_queue[txt_path].append(exporter.content_str)
