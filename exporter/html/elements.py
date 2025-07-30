@@ -21,7 +21,7 @@ class Text(BaseText):
 class Image(BaseImage):
     def _get_content(self):
 
-        return f"""<img src="{self.cache_path}" alt={self.text} {self.readable_size}" />"""
+        return f"""<img src="file:///{self.cache_path}" alt="{self.text} {self.readable_size}" />"""
 
 class File(BaseFile):
     def _get_content(self):
@@ -68,4 +68,4 @@ class Call(BaseCall):
 
 class Feed(BaseFeed):
     def _get_content(self):
-        return f"[动态消息]{self.title} <br /> {self.feed_content} <br /> <img src={self.url} alt= {self.feed_content} />"
+        return f"""[动态消息]{self.title} <br /> {self.feed_content} <br /> <img src="{self.url}"/>"""
