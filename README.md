@@ -50,12 +50,11 @@ Windows用户可到[Releases](https://github.com/Tealina28/QQNT_Export/releases)
 ## 鸣谢
 
 
-| 对象                                                    | 内容                                       |
-|-------------------------------------------------------|------------------------------------------|
-| [@yllhwa](https://github.com/yllhwa)                  | 初始代码和Protobuf定义                          |
-| [@shenapex](https://github.com/shenapex)              | 数据表部分列含义，Protobuf的消息段部分字段含义              |
-| [QQDecrypt](https://qq.sbcnm.top/)                    | 数据表部分列含义，Protobuf的消息段部分字段含义              |
-| [nt_msg.py](https://github.com/BrokenC1oud/nt_msg.py) | SQLAlchemy模型, DatabaseManager（抄了好多，大佬好强） |
+| 对象                                                    | 内容                                                                                                                            |
+|-------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| [@yllhwa](https://github.com/yllhwa)                  | 初始代码和Protobuf定义                                                                                                               |
+| [QQDecrypt](https://docs.aaqwq.top/)                  | 数据表部分列含义，Protobuf的消息段部分字段含义。<br/>该网站的设立者[@shenapex](https://github.com/shenapex)为解读数据库和导出聊天记录做了大量的研究工作，向他致敬🫡。 |
+| [nt_msg.py](https://github.com/BrokenC1oud/nt_msg.py) | SQLAlchemy模型, DatabaseManager（抄了好多，大佬好强）                                                                                      |
 
 ## 免责声明
 
