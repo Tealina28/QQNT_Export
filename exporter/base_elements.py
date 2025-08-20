@@ -1,6 +1,5 @@
 from ast import literal_eval
 from functools import lru_cache
-from xml.etree.ElementTree import fromstring, ParseError
 from lxml import etree as lxml_etree
 
 from humanize import naturalsize
@@ -153,8 +152,8 @@ class BaseNotice:
 
             recover_parser = lxml_etree.XMLParser(recover=True)
             try:
-                root = fromstring(self.info)
-            except ParseError:
+                root = lxml_etree.fromstring(self.info)
+            except lxml_etree.XMLSyntaxError:
                 # 尝试使用恢复模式重新解析
                 root = lxml_etree.fromstring(self.info.encode("utf-8"), parser=recover_parser)
             texts = [
