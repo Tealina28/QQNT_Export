@@ -1,4 +1,4 @@
-from json import loads
+from json import loads, JSONDecodeError
 
 from exporter.base_elements import *
 
@@ -60,7 +60,15 @@ class RedPacket(BaseRedPacket):
 
 class Application(BaseApplication):
     def _get_content(self):
-        return f"[应用消息]{loads(self.raw)["prompt"]}"
+        if self.raw and self.raw.strip():
+            try:
+                data = loads(self.raw)
+                prompt = data.get("prompt", "（无提示信息）") # 使用 .get() 避免因缺少 "prompt" 键而引发 KeyError
+                return f"[应用消息]{prompt}"
+            except JSONDecodeError:
+                # 如果 self.raw 不是有效的 JSON，可以在这里处理
+                return "[应用消息]（无效的消息格式）"
+        return "[应用消息]（空消息）"
 
 class Call(BaseCall):
     def _get_content(self):
