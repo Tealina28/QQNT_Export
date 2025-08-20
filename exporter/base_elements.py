@@ -1,6 +1,7 @@
 from ast import literal_eval
 from functools import lru_cache
-from xml.etree.ElementTree import fromstring
+from xml.etree.ElementTree import fromstring, ParseError
+from lxml import etree as lxml_etree
 
 from humanize import naturalsize
 from unicodedata import category
@@ -150,7 +151,12 @@ class BaseNotice:
             self.info = self.info.replace(r'\/', '/').replace('\u3000', ' ')
             self.info = ''.join(char for char in self.info if category(char) not in ('Cf', 'Cc'))
 
-            root = fromstring(self.info)
+            recover_parser = lxml_etree.XMLParser(recover=True)
+            try:
+                root = fromstring(self.info)
+            except ParseError:
+                # 尝试使用恢复模式重新解析
+                root = lxml_etree.fromstring(self.info.encode("utf-8"), parser=recover_parser)
             texts = [
                 elem.get('txt')
                 for elem in root.findall('.//nor')
