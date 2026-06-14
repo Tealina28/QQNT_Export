@@ -187,14 +187,13 @@ class ChatLabJSONExporter(BaseExporter):
                 parts.append(elem.content.get('text', ''))
 
             elif elem.type == ElementType.IMAGE:
-                filename = elem.content.get('filename', '')
                 text = elem.content.get('text', '')
                 if text:
+                    # 有描述文本时显示
                     parts.append(f"[图片: {text}]")
-                elif filename:
-                    parts.append(f"[图片: {filename}]")
                 else:
-                    parts.append("[图片]")
+                    # 无描述文本时，跳过（最终返回 null）
+                    pass
 
             elif elem.type == ElementType.FILE:
                 filename = elem.content.get('filename', '')
@@ -217,8 +216,10 @@ class ChatLabJSONExporter(BaseExporter):
                 parts.append(f"[{text}]" if text else "[表情]")
 
             elif elem.type == ElementType.QUOTE:
-                # 引用消息显示为特殊格式
-                parts.append("[引用消息]")
+                # 引用元素本身不在 content 中显示
+                # 引用关系通过 replyToMessageId 字段体现
+                # 如果有其他文本元素，会在外层显示
+                pass
 
             elif elem.type == ElementType.NOTICE:
                 text = elem.content.get('text', '')
