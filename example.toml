@@ -3,7 +3,8 @@ pic_path = ".\\chatpic\\" # chatpic目录路径，留空不导出完整路径
 
 output_path = "" # 导出的路径，留空默认为数据库上级目录
 
-c2c_filters = [123456,654321] # 需要输出的私聊消息的QQ号列表，留空导出全部
-group_filters = [654321,123456] # 需要输出的群聊消息的群号列表，留空导出全部
+c2c_filters = [] # 需要输出的私聊消息的QQ号列表，留空导出全部
+group_filters = [] # 需要输出的群聊消息的群号列表，留空导出全部
 
-output_format = ["txt", "json"] # 需要导出的文件格式
+# 导出格式：chatlab_json（ChatLab JSON 格式）或 chatlab_jsonl（ChatLab JSONL 流式格式）
+output_format = ["chatlab_json", "chatlab_jsonl"]
