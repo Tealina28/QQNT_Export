@@ -7,8 +7,14 @@ __pycache__/
 
 # Virtual Environment
 venv/
+venv-windows/
 env/
 ENV/
+
+# PyInstaller
+build/
+dist/
+# *.spec  # 保留 spec 配置文件
 
 # IDEs
 .vscode/
@@ -19,6 +25,7 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+*.Zone.Identifier
 
 # Project specific
 output/
