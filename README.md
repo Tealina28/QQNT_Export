@@ -8,8 +8,10 @@
 
 - **解析与导出解耦**：清晰的三层架构（数据库 → 解析 → 导出）
 - **支持 ChatLab 格式**：符合 [ChatLab v0.0.2](https://github.com/ChatLab/ChatLab) 标准
+- **丰富的消息类型**：文本、图片（含闪照）、文件、语音、视频、QQ/商城表情、引用、撤回、拍一拍、红包、Ark 卡片、位置等
 - **插件化导出器**：轻松添加新的导出格式
 - **可扩展解析器**：注册机制添加新的消息元素类型
+- **导出进度条**：基于 tqdm 实时显示导出进度
 - **流式处理**：JSONL 格式支持超大规模数据导出
 
 ## 📦 导出格式
@@ -21,10 +23,9 @@
 
 ### 方式 1：使用预编译版本（推荐 Windows 用户）
 
-1. 从 [Releases](https://github.com/Tealina28/QQNT_Export/releases) 下载最新的 `QQNT_Export-v3.0.0.zip`
-2. 解压到任意目录
-3. 编辑 `example.toml` 配置文件（设置数据库路径等）
-4. 在命令行运行：
+1. 从 [Releases](https://github.com/Tealina28/QQNT_Export/releases) 下载最新的 `QQNT_Export-v3.0.0.exe`
+2. 准备 `example.toml` 配置文件（设置数据库路径等），与 exe 放在同一目录
+3. 在命令行运行：
    ```bash
    QQNT_Export.exe example.toml
    ```
@@ -193,6 +194,8 @@ class MyExporter(BaseExporter):
 | [QQDecrypt](https://docs.aaqwq.top/) | 数据表部分列含义，Protobuf的消息段部分字段含义 |
 | [@shenapex](https://github.com/shenapex) | 解读数据库和导出聊天记录的研究工作 |
 | [nt_msg.py](https://github.com/BrokenC1oud/nt_msg.py) | SQLAlchemy模型, DatabaseManager |
+| [qq-dump](https://github.com/miniyu157/qq-dump) | Protobuf 字段映射参考（撤回、互动表情、Ark 卡片等消息语义） |
+| [QQNT-Database-Export-Tool](https://github.com/star-picker/QQNT-Database-Export-Tool) | 消息元素解析逻辑参考 |
 | [ChatLab](https://github.com/ChatLab/ChatLab) | 标准化聊天数据交换格式 |
 
 ## 💬 讨论与贡献
@@ -209,13 +212,15 @@ class MyExporter(BaseExporter):
 
 ## 🔄 版本历史
 
-### v3.0.0 (2024-06-14)
+### v3.0.0 (2026-06-14)
 
 - 🎉 全面重构：解析和导出完全解耦
 - ✨ 支持 ChatLab v0.0.2 标准格式
 - ✨ 插件化导出器架构
 - ✨ 注册机制的元素解析器
 - ✨ JSONL 流式导出支持超大规模数据
+- ✨ 丰富消息语义解析（撤回、拍一拍/戳一戳、闪照、商城表情、Ark 卡片路由等）
+- ✨ 导出进度条（tqdm）
 - 🐛 优化图片和引用消息的 ChatLab 格式
 - 📝 完整的文档和测试
 
