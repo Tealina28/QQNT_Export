@@ -76,12 +76,16 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
             "accountName": self._get_account_name(msg, member_map),
             "timestamp": msg.timestamp,
             "type": self._infer_message_type(msg.elements),
-            "content": self._build_content(msg.elements)
+            "content": self._build_content(msg.elements, member_map)
         }
 
         # 可选字段：引用消息
         if msg.quoted_msg_id:
             message_data["replyToMessageId"] = msg.quoted_msg_id
+        # 引用原消息摘要（降级展示）
+        reply_summary = self._build_reply_summary(msg.elements)
+        if reply_summary:
+            message_data["replyToSummary"] = reply_summary
 
         # 群聊特有字段
         if msg.is_group_message():

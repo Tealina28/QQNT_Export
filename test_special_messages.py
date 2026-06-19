@@ -194,6 +194,69 @@ def test_mixed_elements():
         output_path.unlink()
 
 
+def test_new_element_semantics():
+    """测试新增元素语义：撤回/拍一拍/闪照/动画表情/Ark/引用摘要
+
+    走完整的 protobuf -> ElementParser -> 导出层 路径。
+    """
+    print("\n测试新增元素语义...")
+
+    import element_pb2
+    from parser.elements import ElementParser
+
+    exp = ChatLabJSONExporter.__new__(ChatLabJSONExporter)
+    mm = {
+        'uidA': ParsedMember(platform_id='uidA', qq_num=111, nickname='小明'),
+        'uidB': ParsedMember(platform_id='uidB', qq_num=222, nickname='小红'),
+    }
+
+    def content(el):
+        return exp._build_content([ElementParser.parse(el)], mm)
+
+    # 撤回
+    e = element_pb2.Element(type=8, recallerUid='uidA', recallSuffix='你猜猜')
+    assert content(e) == '[小明 撤回了一条消息 你猜猜]', content(e)
+    print(f"  ✓ 撤回: {content(e)}")
+
+    # 拍一拍（互动灰字）
+    xml = '<gtip><qq uin="uidA"/><nor txt="拍了拍"/><qq uin="uidB"/><nor txt="的脑袋"/></gtip>'
+    e = element_pb2.Element(type=8, noticeInfo=xml)
+    assert content(e) == '小明 拍了拍 小红的脑袋', content(e)
+    print(f"  ✓ 拍一拍: {content(e)}")
+
+    # 闪照
+    e = element_pb2.Element(type=2, imageIsFlash=1)
+    assert content(e) == '[闪照]', content(e)
+    print(f"  ✓ 闪照: {content(e)}")
+
+    # 特殊动画表情 sub_type=7
+    e = element_pb2.Element(type=2, subType=7, imageText='嘿嘿')
+    assert content(e) == '嘿嘿', content(e)
+    print(f"  ✓ 动画表情: {content(e)}")
+
+    # 普通图片无描述 -> None
+    e = element_pb2.Element(type=2)
+    assert content(e) is None, content(e)
+    print(f"  ✓ 普通图片无描述: None")
+
+    # Ark 合并转发
+    ark = '{"app":"com.tencent.multimsg","meta":{"detail":{"source":"群聊的聊天记录","summary":"查看3条转发消息"}}}'
+    e = element_pb2.Element(type=10, applicationMessage=ark)
+    assert content(e) == '[聊天记录] 群聊的聊天记录: 查看3条转发消息', content(e)
+    print(f"  ✓ 合并转发: {content(e)}")
+
+    # Ark 音乐分享
+    ark = '{"app":"com.tencent.music.lua","view":"music","meta":{"music":{"title":"晴天","desc":"周杰伦"}}}'
+    e = element_pb2.Element(type=10, applicationMessage=ark)
+    assert content(e) == '[分享] 晴天 - 周杰伦', content(e)
+    print(f"  ✓ 音乐分享: {content(e)}")
+
+    # 引用摘要兜底（quotedElement 为空时用 47413）
+    q = element_pb2.Element(type=7, quotedSummary='原消息文本')
+    assert exp._build_reply_summary([ElementParser.parse(q)]) == '原消息文本'
+    print(f"  ✓ 引用摘要兜底: 原消息文本")
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("特殊消息类型 ChatLab 格式测试")
@@ -203,6 +266,7 @@ if __name__ == '__main__':
         test_image_message()
         test_quote_message()
         test_mixed_elements()
+        test_new_element_semantics()
 
         print("\n" + "=" * 60)
         print("✓ 所有测试通过！")

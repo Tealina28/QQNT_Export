@@ -78,6 +78,8 @@ def parse_image(element) -> ParsedElement:
         'text': element.imageText,  # 图片描述文字
         'file_path': element.imageFilePath,
         'url_origin': element.imageUrlOrigin,
+        'sub_type': element.subType,       # 子类型：7=特殊动画表情，1/2=普通动画/超级秀
+        'is_flash': element.imageIsFlash,  # 1=闪照
     }
 
     # MD5（用于计算缓存路径）
@@ -169,16 +171,26 @@ def parse_quote(element) -> ParsedElement:
             'sender_num': element.senderNum,
             'quoted_timestamp': element.quotedTimestamp,
             'quoted_content': quoted_content,
+            'summary': element.quotedSummary,  # 原消息文本摘要（降级兜底，原始字段 47413）
         }
     )
 
 
 @ElementParser.register(8)
 def parse_notice(element) -> ParsedElement:
-    """解析系统提示消息"""
+    """解析系统提示消息
+
+    type 8（grayTipElement）涵盖三种子情况，统一在 content['notice_type'] 中标注：
+    - 'withdraw'：撤回提示（存在 recallerUid 字段）
+    - 'interactive'：互动提示（拍一拍/戳一戳，XML 内含多个 <qq uin> + <nor txt>）
+    - 'generic'：其他普通灰字提示
+
+    解析层只抽取原始字段（uid、原文等），uid→显示名 的解析交给导出层。
+    """
     from unicodedata import category
     from lxml import etree as lxml_etree
     from ast import literal_eval
+    import re
 
     notice_text = ""
 
@@ -207,12 +219,32 @@ def parse_notice(element) -> ParsedElement:
         except Exception:
             notice_text = element.noticeInfo2
 
+    content = {
+        'text': notice_text or "[系统提示]",
+        'raw': element.noticeInfo or element.noticeInfo2,  # 原始 XML/字典字符串
+        'notice_type': 'generic',
+    }
+
+    # 撤回提示：存在撤回者 UID
+    if element.recallerUid:
+        content['notice_type'] = 'withdraw'
+        content['recaller_uid'] = element.recallerUid
+        content['recaller_name'] = element.recallerName  # 后备名（不可靠）
+        content['suffix'] = element.recallSuffix
+    elif element.noticeInfo:
+        # 互动提示（拍一拍/戳一戳）：XML 内含至少两个 <qq uin> 与 <nor txt>
+        uids = re.findall(r'<qq uin="([^"]+)"', element.noticeInfo)
+        nor_texts = re.findall(r'<nor txt="([^"]*)"', element.noticeInfo)
+        if len(uids) >= 2 and nor_texts:
+            content['notice_type'] = 'interactive'
+            content['actor_uid'] = uids[0]
+            content['target_uid'] = uids[1]
+            content['verb'] = nor_texts[0]
+            content['suffix'] = nor_texts[1] if len(nor_texts) > 1 else ''
+
     return ParsedElement(
         type=ElementType.NOTICE,
-        content={
-            'text': notice_text or "[系统提示]",
-            'raw': element.noticeInfo or element.noticeInfo2,  # 原始 XML/字典字符串
-        }
+        content=content
     )
 
 

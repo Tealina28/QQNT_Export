@@ -5,6 +5,7 @@ message Elements {repeated Element elements = 40800;}
 message Element {
   uint64 id = 45001;
   uint32 type = 45002;
+  uint32 subType = 45003; // 子元素类型，用于区分闪照/动画表情等
   // 1：文本段，2：图片段，3：文件消息，4:语音消息，5：视频，6：表情段，7：引用段，
   // 8：提示消息（中间灰色），9：红包，10：应用消息
   // 21：通话段
@@ -21,6 +22,7 @@ message Element {
   bytes md5HexStr = 45406; // 小写
   uint64 original = 45418; // 0 false, 1 true
   string originImageMd5 = 45424;
+  uint64 imageIsFlash = 45829; // 1 为闪照
 
   string imageUrlLow = 45802;
   string imageUrlHigh = 45803;
@@ -68,6 +70,7 @@ message Element {
   uint32 senderNum = 47403;
   uint32 quotedTimestamp = 47404;
   uint32 interlocutorNum = 47411;
+  string quotedSummary = 47413; // 被引用原消息的文本摘要（降级兜底）
 
   Element quotedElement = 47423;
 
@@ -75,6 +78,11 @@ message Element {
   // 提示消息
   string noticeInfo = 48214;
   string noticeInfo2 = 48271; // ?
+
+  // 撤回提示（grayTipElement, type 8 的子情况）
+  string recallerUid = 47703;  // 撤回者 UID
+  string recallerName = 47705; // 撤回者昵称（后备，不可靠）
+  string recallSuffix = 47713; // 撤回后缀文本，如 "你猜猜撤回了什么。"
 
 
   // 红包

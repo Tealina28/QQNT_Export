@@ -102,12 +102,16 @@ class ChatLabJSONExporter(BaseExporter):
                 "accountName": self._get_account_name(msg, member_map),
                 "timestamp": msg.timestamp,
                 "type": self._infer_message_type(msg.elements),
-                "content": self._build_content(msg.elements)
+                "content": self._build_content(msg.elements, member_map)
             }
 
             # 可选字段：引用消息
             if msg.quoted_msg_id:
                 message_data["replyToMessageId"] = msg.quoted_msg_id
+            # 引用原消息摘要（被引用消息可能已不在库中，作为降级展示）
+            reply_summary = self._build_reply_summary(msg.elements)
+            if reply_summary:
+                message_data["replyToSummary"] = reply_summary
 
             # 群聊特有字段
             if msg.is_group_message():
@@ -118,6 +122,32 @@ class ChatLabJSONExporter(BaseExporter):
             result.append(message_data)
 
         return result
+
+    def _resolve_name(
+        self,
+        uid: str,
+        member_map: dict[str, ParsedMember]
+    ) -> Optional[str]:
+        """将 UID 解析为显示名，找不到则返回 None"""
+        if not uid:
+            return None
+        member = member_map.get(uid)
+        if member:
+            return member.get_display_name()
+        return None
+
+    def _build_reply_summary(self, elements: list) -> Optional[str]:
+        """从引用元素提取原消息摘要（优先递归内容，其次 47413 摘要）"""
+        for elem in elements:
+            if elem.type != ElementType.QUOTE:
+                continue
+            quoted = elem.content.get('quoted_content')
+            if quoted and quoted.get('text'):
+                return quoted['text']
+            summary = elem.content.get('summary')
+            if summary:
+                return summary
+        return None
 
     def _get_account_name(
         self,
@@ -178,14 +208,20 @@ class ChatLabJSONExporter(BaseExporter):
         # 都是文本
         return 0
 
-    def _build_content(self, elements: list) -> Optional[str]:
+    def _build_content(
+        self,
+        elements: list,
+        member_map: Optional[dict[str, ParsedMember]] = None
+    ) -> Optional[str]:
         """构建消息内容字符串
 
-        将多个元素合并为一个字符串展示。
+        将多个元素合并为一个字符串展示。member_map 用于把撤回/拍一拍等
+        提示中的 UID 解析为显示名。
         """
         if not elements:
             return None
 
+        member_map = member_map or {}
         parts = []
 
         for elem in elements:
@@ -193,13 +229,9 @@ class ChatLabJSONExporter(BaseExporter):
                 parts.append(elem.content.get('text', ''))
 
             elif elem.type == ElementType.IMAGE:
-                text = elem.content.get('text', '')
-                if text:
-                    # 有描述文本时显示
-                    parts.append(f"[图片: {text}]")
-                else:
-                    # 无描述文本时，跳过（最终返回 null）
-                    pass
+                img = self._format_image(elem.content)
+                if img:
+                    parts.append(img)
 
             elif elem.type == ElementType.FILE:
                 filename = elem.content.get('filename', '')
@@ -228,8 +260,7 @@ class ChatLabJSONExporter(BaseExporter):
                 pass
 
             elif elem.type == ElementType.NOTICE:
-                text = elem.content.get('text', '')
-                parts.append(text if text else "[系统提示]")
+                parts.append(self._format_notice(elem.content, member_map))
 
             elif elem.type == ElementType.RED_PACKET:
                 prompt = elem.content.get('prompt', '')
@@ -244,7 +275,7 @@ class ChatLabJSONExporter(BaseExporter):
                 parts.append(f"[动态: {title}]" if title else "[动态]")
 
             elif elem.type == ElementType.APPLICATION:
-                parts.append("[应用消息]")
+                parts.append(self._format_application(elem.content))
 
             elif elem.type == ElementType.MARKET_FACE:
                 text = elem.content.get('text', '')
@@ -278,3 +309,85 @@ class ChatLabJSONExporter(BaseExporter):
 
         content = '\n'.join(parts)
         return content if content else None
+
+    def _format_image(self, c: dict[str, Any]) -> Optional[str]:
+        """格式化图片元素的展示文本
+
+        - 闪照 → [闪照]
+        - 特殊动画表情（sub_type=7）→ 表情描述
+        - 普通图片有描述 → [图片: 描述]
+        - 普通图片无描述 → None（由 type 字段体现为图片）
+        """
+        text = c.get('text', '')
+        if c.get('is_flash') == 1:
+            return f"[闪照: {text}]" if text else "[闪照]"
+        if c.get('sub_type') == 7 and text:
+            # 特殊动画表情，描述本身即外显内容
+            return text
+        if text:
+            return f"[图片: {text}]"
+        return None
+
+    def _format_notice(
+        self,
+        c: dict[str, Any],
+        member_map: dict[str, ParsedMember]
+    ) -> str:
+        """格式化系统提示（撤回 / 拍一拍 / 普通灰字）"""
+        ntype = c.get('notice_type')
+
+        if ntype == 'withdraw':
+            name = (self._resolve_name(c.get('recaller_uid'), member_map)
+                    or c.get('recaller_name') or "某人")
+            suffix = c.get('suffix') or ''
+            return f"[{name} 撤回了一条消息{(' ' + suffix) if suffix else ''}]"
+
+        if ntype == 'interactive':
+            actor = self._resolve_name(c.get('actor_uid'), member_map) or "某人"
+            target = self._resolve_name(c.get('target_uid'), member_map) or "某人"
+            verb = c.get('verb') or "戳了戳"
+            suffix = c.get('suffix') or ''
+            return f"{actor} {verb} {target}{suffix}"
+
+        text = c.get('text', '')
+        return text if text else "[系统提示]"
+
+    def _format_application(self, c: dict[str, Any]) -> str:
+        """格式化 Ark 卡片消息，按 app 类型路由（音乐/位置/合并转发/名片等）"""
+        import json as _json
+
+        raw = c.get('raw')
+        if not raw:
+            return "[应用消息]"
+        try:
+            data = _json.loads(raw.decode('utf-8', 'ignore') if isinstance(raw, bytes) else raw)
+        except Exception:
+            return "[应用消息]"
+
+        app = data.get('app', '')
+        prompt = data.get('prompt', '') or ''
+        meta = data.get('meta', {}) or {}
+
+        if app == "com.tencent.map" and data.get('view') == "LocationShare":
+            loc = meta.get('Location.Search', {}) or {}
+            name = loc.get('name') or "未知地点"
+            address = loc.get('address') or ""
+            return f"[位置: {name}{(' | ' + address) if address else ''}]"
+
+        if app == "com.tencent.music.lua" and data.get('view') == "music":
+            music = meta.get('music', {}) or {}
+            title = music.get('title') or ""
+            artist = music.get('desc') or ""
+            return f"[分享] {title}{(' - ' + artist) if artist else ''}".strip()
+
+        if app == "com.tencent.multimsg":
+            detail = meta.get('detail', {}) or {}
+            source = detail.get('source') or "聊天记录"
+            summary = detail.get('summary') or "查看转发"
+            return f"[聊天记录] {source}: {summary}"
+
+        if app == "com.tencent.contact.lua":
+            return f"[名片] {prompt}" if prompt else "[名片]"
+
+        # 兜底：用 prompt 外显，否则标注应用消息
+        return prompt if prompt else "[应用消息]"
