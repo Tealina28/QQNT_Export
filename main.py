@@ -9,14 +9,28 @@ import tomllib
 from pathlib import Path
 from sys import argv
 
+from tqdm import tqdm
+
 from db import DatabaseManager
 from parser import MessageParser
 from exporters import EXPORTER_MAP
 
+
+class TqdmLoggingHandler(logging.Handler):
+    """通过 tqdm.write 输出日志，避免与进度条互相冲刷"""
+
+    def emit(self, record):
+        try:
+            tqdm.write(self.format(record))
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[TqdmLoggingHandler()]
 )
 
 
@@ -225,7 +239,7 @@ def main():
     # 导出私聊
     if c2c_queries:
         logging.info(f"找到 {len(c2c_queries)} 个私聊对话")
-        for uid, query in c2c_queries.items():
+        for uid, query in tqdm(c2c_queries.items(), desc="导出私聊", unit="个"):
             try:
                 export_c2c_conversation(
                     parser, dbman, uid, query,
@@ -237,7 +251,7 @@ def main():
     # 导出群聊
     if group_queries:
         logging.info(f"找到 {len(group_queries)} 个群聊")
-        for group_num, query in group_queries.items():
+        for group_num, query in tqdm(group_queries.items(), desc="导出群聊", unit="个"):
             try:
                 export_group_conversation(
                     parser, dbman, group_num, query,
