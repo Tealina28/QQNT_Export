@@ -21,8 +21,14 @@ class ElementType(IntEnum):
     NOTICE = 8
     RED_PACKET = 9
     APPLICATION = 10
+    MARKET_FACE = 11    # 商城表情
+    MARKDOWN = 14       # markdown 消息
+    XML = 16            # XML 消息
     CALL = 21
     FEED = 26
+    BUBBLE_FACE = 27    # 弹射/平底锅表情
+    LOCATION = 28       # 位置共享
+    BOT = 44            # 机器人对话
     OTHER = 99
 
 

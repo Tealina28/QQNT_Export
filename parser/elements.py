@@ -148,6 +148,7 @@ def parse_emoji(element) -> ParsedElement:
         content={
             'emoji_id': element.emojiId,
             'text': emoji_text,
+            'raw_text': element.emojiText,  # 原始外显文字（未经查表回退）
         }
     )
 
@@ -209,7 +210,8 @@ def parse_notice(element) -> ParsedElement:
     return ParsedElement(
         type=ElementType.NOTICE,
         content={
-            'text': notice_text or "[系统提示]"
+            'text': notice_text or "[系统提示]",
+            'raw': element.noticeInfo or element.noticeInfo2,  # 原始 XML/字典字符串
         }
     )
 
@@ -238,6 +240,41 @@ def parse_application(element) -> ParsedElement:
     )
 
 
+@ElementParser.register(11)
+def parse_market_face(element) -> ParsedElement:
+    """解析商城表情（原创表情）"""
+    return ParsedElement(
+        type=ElementType.MARKET_FACE,
+        content={
+            'text': element.marketFaceText,  # 外显文本，如 "[贴贴]"
+            'package_id': element.marketFacePackageId,
+            'key': element.marketFaceKey,
+        }
+    )
+
+
+@ElementParser.register(14)
+def parse_markdown(element) -> ParsedElement:
+    """解析 markdown 消息（常见于机器人）"""
+    return ParsedElement(
+        type=ElementType.MARKDOWN,
+        content={
+            'text': element.markdownText,
+        }
+    )
+
+
+@ElementParser.register(16)
+def parse_xml(element) -> ParsedElement:
+    """解析 XML 消息"""
+    return ParsedElement(
+        type=ElementType.XML,
+        content={
+            'xml': element.xmlContent,
+        }
+    )
+
+
 @ElementParser.register(21)
 def parse_call(element) -> ParsedElement:
     """解析通话消息"""
@@ -246,6 +283,41 @@ def parse_call(element) -> ParsedElement:
         content={
             'status': element.callStatus,
             'text': element.callText,
+        }
+    )
+
+
+@ElementParser.register(27)
+def parse_bubble_face(element) -> ParsedElement:
+    """解析弹射/平底锅表情"""
+    return ParsedElement(
+        type=ElementType.BUBBLE_FACE,
+        content={
+            'summary': element.bubbleFaceSummary,  # 外显摘要，如 "[平底锅]x10"
+            'emoji_id': element.emojiId,
+            'emoji_text': element.emojiText,
+        }
+    )
+
+
+@ElementParser.register(28)
+def parse_location(element) -> ParsedElement:
+    """解析位置共享消息"""
+    return ParsedElement(
+        type=ElementType.LOCATION,
+        content={
+            'text': element.locationText,
+        }
+    )
+
+
+@ElementParser.register(44)
+def parse_bot_chat(element) -> ParsedElement:
+    """解析机器人对话消息"""
+    return ParsedElement(
+        type=ElementType.BOT,
+        content={
+            'text': element.markdownText,
         }
     )
 

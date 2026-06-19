@@ -151,12 +151,18 @@ class ChatLabJSONExporter(BaseExporter):
             ElementType.VIDEO: 3,       # VIDEO
             ElementType.FILE: 4,        # FILE
             ElementType.EMOJI: 5,       # EMOJI
+            ElementType.MARKET_FACE: 5, # EMOJI（商城表情）
+            ElementType.BUBBLE_FACE: 5, # EMOJI（弹射表情）
             ElementType.QUOTE: 25,      # REPLY
             ElementType.NOTICE: 80,     # SYSTEM
             ElementType.RED_PACKET: 20, # RED_PACKET
             ElementType.APPLICATION: 24,# SHARE
             ElementType.CALL: 23,       # CALL
             ElementType.FEED: 24,       # SHARE
+            ElementType.MARKDOWN: 0,    # TEXT（markdown）
+            ElementType.BOT: 0,         # TEXT（机器人对话）
+            ElementType.XML: 99,        # OTHER
+            ElementType.LOCATION: 99,   # OTHER（位置共享）
             ElementType.OTHER: 99,      # OTHER
         }
 
@@ -239,6 +245,33 @@ class ChatLabJSONExporter(BaseExporter):
 
             elif elem.type == ElementType.APPLICATION:
                 parts.append("[应用消息]")
+
+            elif elem.type == ElementType.MARKET_FACE:
+                text = elem.content.get('text', '')
+                if not text:
+                    parts.append("[商城表情]")
+                elif text.startswith('['):
+                    # 外显文本通常已自带方括号，如 "[贴贴]"
+                    parts.append(text)
+                else:
+                    parts.append(f"[{text}]")
+
+            elif elem.type == ElementType.BUBBLE_FACE:
+                # 优先外显摘要，缺失时回退到普通表情文本
+                text = elem.content.get('summary') or elem.content.get('emoji_text')
+                parts.append(text if text else "[表情]")
+
+            elif elem.type == ElementType.MARKDOWN or elem.type == ElementType.BOT:
+                text = elem.content.get('text', '')
+                parts.append(text if text else "[消息]")
+
+            elif elem.type == ElementType.XML:
+                xml = elem.content.get('xml', '')
+                parts.append(xml if xml else "[XML消息]")
+
+            elif elem.type == ElementType.LOCATION:
+                text = elem.content.get('text', '')
+                parts.append(f"[位置: {text}]" if text else "[位置共享]")
 
             else:
                 parts.append("[未知消息]")

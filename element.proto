@@ -99,6 +99,30 @@ message Element {
 
   string feedJumpInfo = 48183;
   string feedPublisherUid = 48188;
+
+
+  // 商城表情（marketFaceElement, type 11）
+  // 外显描述文本，如 "[贴贴]"
+  string marketFaceText = 80900;
+  uint64 marketFacePackageId = 80810; // 表情包 ID
+  string marketFaceKey = 80824;       // 表情字符 ID（Key）
+
+
+  // markdown / 机器人消息 / markdown 按钮（type 14、17、44）
+  string markdownText = 48701;
+
+
+  // XML 消息（type 16）
+  string xmlContent = 48602;
+
+
+  // 弹射/平底锅表情（faceBubbleElement, type 27）
+  // 摘要，如 "[平底锅]x10"
+  string bubbleFaceSummary = 52138;
+
+
+  // 位置共享（shareLocationElement, type 28）
+  string locationText = 52152;
 }
 
 message FeedMessage {string text = 48178;}
