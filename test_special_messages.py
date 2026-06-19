@@ -251,10 +251,10 @@ def test_new_element_semantics():
     assert content(e) == '[分享] 晴天 - 周杰伦', content(e)
     print(f"  ✓ 音乐分享: {content(e)}")
 
-    # 引用摘要兜底（quotedElement 为空时用 47413）
+    # 引用摘要：解析层保留原始 47413 字段（不输出到 chatlab）
     q = element_pb2.Element(type=7, quotedSummary='原消息文本')
-    assert exp._build_reply_summary([ElementParser.parse(q)]) == '原消息文本'
-    print(f"  ✓ 引用摘要兜底: 原消息文本")
+    assert ElementParser.parse(q).content['summary'] == '原消息文本'
+    print(f"  ✓ 引用摘要原始字段保留: 原消息文本")
 
 
 if __name__ == '__main__':

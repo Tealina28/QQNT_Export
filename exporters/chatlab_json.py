@@ -108,10 +108,6 @@ class ChatLabJSONExporter(BaseExporter):
             # 可选字段：引用消息
             if msg.quoted_msg_id:
                 message_data["replyToMessageId"] = msg.quoted_msg_id
-            # 引用原消息摘要（被引用消息可能已不在库中，作为降级展示）
-            reply_summary = self._build_reply_summary(msg.elements)
-            if reply_summary:
-                message_data["replyToSummary"] = reply_summary
 
             # 群聊特有字段
             if msg.is_group_message():
@@ -134,19 +130,6 @@ class ChatLabJSONExporter(BaseExporter):
         member = member_map.get(uid)
         if member:
             return member.get_display_name()
-        return None
-
-    def _build_reply_summary(self, elements: list) -> Optional[str]:
-        """从引用元素提取原消息摘要（优先递归内容，其次 47413 摘要）"""
-        for elem in elements:
-            if elem.type != ElementType.QUOTE:
-                continue
-            quoted = elem.content.get('quoted_content')
-            if quoted and quoted.get('text'):
-                return quoted['text']
-            summary = elem.content.get('summary')
-            if summary:
-                return summary
         return None
 
     def _get_account_name(
