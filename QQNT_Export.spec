@@ -8,7 +8,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('example.toml', '.'),
-        ('element.proto', '.'),
         ('emojis.py', '.'),
     ],
     hiddenimports=[
