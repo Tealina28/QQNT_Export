@@ -105,7 +105,10 @@ def export_c2c_conversation(
     if other_member:
         members.append(other_member)
 
-    # TODO: 添加"我"的信息（需要从配置或数据库获取当前用户信息）
+    # 我（当前登录账号）
+    self_member = parser.get_self_member()
+    if self_member and (not other_member or self_member.platform_id != other_member.platform_id):
+        members.append(self_member)
 
     # 构建 meta
     meta = {
@@ -113,6 +116,8 @@ def export_c2c_conversation(
         'platform': 'qq',
         'type': 'private'
     }
+    if self_member:
+        meta['ownerId'] = self_member.platform_id
 
     # 导出
     for format_name in output_formats:

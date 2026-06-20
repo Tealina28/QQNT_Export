@@ -22,6 +22,9 @@ class MessageParser:
             dbman: 数据库管理器
         """
         self.dbman = dbman
+        # “我”（当前登录账号）的成员信息缓存
+        self._self_member: Optional[ParsedMember] = None
+        self._self_member_resolved = False
 
     def parse_c2c_message(self, msg: C2cMessage) -> ParsedMessage:
         """解析私聊消息
@@ -107,6 +110,36 @@ class MessageParser:
             nickname=profile.nickname or "",
             remark=profile.remark,
         )
+
+    def get_self_member(self) -> Optional[ParsedMember]:
+        """识别并返回“我”（当前登录账号）的成员信息。
+
+        nt_msg.db 的 uid 映射表首项即本账号，直接取其 uid 与 qq 号；
+        昵称尽量用好友资料补全（该表通常不含自己），缺失时回退为 qq 号。
+        结果缓存，避免重复查询。
+        """
+        if self._self_member_resolved:
+            return self._self_member
+        self._self_member_resolved = True
+
+        mapping = self.dbman.self_uid_mapping()
+        if not mapping or not mapping.uid:
+            return None
+
+        nickname = ""
+        remark = None
+        profile = self.dbman.profile_info(mapping.uid)
+        if profile:
+            nickname = profile.nickname or ""
+            remark = profile.remark
+
+        self._self_member = ParsedMember(
+            platform_id=mapping.uid,
+            qq_num=mapping.qq_num,
+            nickname=nickname or str(mapping.qq_num),
+            remark=remark,
+        )
+        return self._self_member
 
     def get_group_member(self, group_num: int, uid: str) -> Optional[ParsedMember]:
         """获取群成员信息
