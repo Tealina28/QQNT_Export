@@ -138,18 +138,6 @@ QQNT_Export/
 - **Android**: [qqnt_backup](https://github.com/xCipHanD/qqnt_backup)
 - **Windows**: 参考 [qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)
 
-## 🧪 测试
-
-运行架构测试：
-```bash
-python test_architecture.py
-```
-
-运行特殊消息测试：
-```bash
-python test_special_messages.py
-```
-
 ## 🛠️ 开发指南
 
 ### 添加新的消息元素类型
@@ -210,20 +198,3 @@ class MyExporter(BaseExporter):
 
 本项目不对生成内容的完整性、准确性作任何担保，生成的一切内容不可用于法律取证，您不应当将其用于学习与交流外的任何用途。
 
-## 🔄 版本历史
-
-### v3.0.0 (2026-06-14)
-
-- 🎉 全面重构：解析和导出完全解耦
-- ✨ 支持 ChatLab v0.0.2 标准格式
-- ✨ 插件化导出器架构
-- ✨ 注册机制的元素解析器
-- ✨ JSONL 流式导出支持超大规模数据
-- ✨ 丰富消息语义解析（撤回、拍一拍/戳一戳、闪照、商城表情、Ark 卡片路由等）
-- ✨ 导出进度条（tqdm）
-- 🐛 优化图片和引用消息的 ChatLab 格式
-- 📝 完整的文档和测试
-
-### v2.x 及更早版本
-
-查看 [v2.x 分支](https://github.com/Tealina28/QQNT_Export/tree/main) 获取原始版本。
