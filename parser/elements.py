@@ -7,8 +7,13 @@ Element 解析器
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
+import logging
 
-from .models import ParsedElement, ElementType
+from .models import ParsedElement, ElementType, ParsedMessage
+import element_pb2
+
+
+logger = logging.getLogger(__name__)
 
 
 class ElementParser:
@@ -34,17 +39,21 @@ class ElementParser:
         return decorator
 
     @classmethod
-    def parse(cls, element) -> Optional[ParsedElement]:
+    def parse(cls, element, forward_cache_bytes: Optional[bytes] = None) -> Optional[ParsedElement]:
         """解析单个 element
 
         Args:
             element: protobuf Element 对象
+            forward_cache_bytes: 合并转发的 40900 缓存字段（仅用于 type=10）
 
         Returns:
-            ParsedElement 对象，未知类型返回 None
+            ParsedElement 对象，未知类型返回 OTHER
         """
         parser = cls._parsers.get(element.type)
         if parser:
+            # type=10 需要额外传入 forward_cache_bytes
+            if element.type == 10:
+                return parser(element, forward_cache_bytes)
             return parser(element)
 
         # 未知类型返回 OTHER
@@ -262,13 +271,26 @@ def parse_red_packet(element) -> ParsedElement:
 
 
 @ElementParser.register(10)
-def parse_application(element) -> ParsedElement:
-    """解析应用消息（小程序、分享卡片等）"""
+def parse_application(element, forward_cache_bytes: Optional[bytes] = None) -> ParsedElement:
+    """解析应用消息（小程序、分享卡片等）
+
+    Args:
+        element: protobuf Element 对象
+        forward_cache_bytes: 合并转发的 40900 缓存字段（仅当 msg_type==8 时传入）
+    """
+    content = {
+        'raw': element.applicationMessage,
+    }
+
+    # 尝试展开合并转发（仅当提供了 forward_cache_bytes 时）
+    if forward_cache_bytes:
+        forward_messages = _parse_forward_cache(forward_cache_bytes)
+        if forward_messages:
+            content['forward_messages'] = forward_messages
+
     return ParsedElement(
         type=ElementType.APPLICATION,
-        content={
-            'raw': element.applicationMessage,
-        }
+        content=content
     )
 
 
@@ -370,6 +392,98 @@ def parse_feed(element) -> ParsedElement:
 # ============================================================================
 # 辅助函数
 # ============================================================================
+
+def _parse_forward_cache(cache_bytes: bytes) -> list[ParsedMessage]:
+    """解析合并转发的 40900 缓存字段
+
+    Args:
+        cache_bytes: 40900 字段的原始字节（protobuf repeated ForwardedMessage）
+
+    Returns:
+        解析后的子消息列表（ParsedMessage）
+    """
+    if not cache_bytes:
+        return []
+
+    forwarded_messages = []
+    offset = 0
+
+    # 40900 字段是 repeated，手动解析每条子消息（tag=40900, wire_type=2）
+    while offset < len(cache_bytes):
+        try:
+            # 读取 varint tag
+            tag, offset = _read_varint(cache_bytes, offset)
+            field_num = tag >> 3
+            wire_type = tag & 0x7
+
+            if field_num != 40900 or wire_type != 2:  # 期望 tag=40900, wire_type=length-delimited
+                logger.warning(f"unexpected tag in 40900: field={field_num}, wire={wire_type}")
+                break
+
+            # 读取 length
+            length, offset = _read_varint(cache_bytes, offset)
+            sub_msg_bytes = cache_bytes[offset:offset + length]
+            offset += length
+
+            # 解析子消息
+            fwd_msg = element_pb2.ForwardedMessage()
+            fwd_msg.ParseFromString(sub_msg_bytes)
+
+            # 解析子消息的 messageBody（40800 字段）
+            # 注意：40800 直接是一个 Element，不是 Elements{repeated Element}
+            elements_list = []
+            if fwd_msg.messageBody:
+                try:
+                    # 尝试解析为单个 Element
+                    elem = element_pb2.Element()
+                    elem.ParseFromString(fwd_msg.messageBody)
+                    parsed = ElementParser.parse(elem)
+                    if parsed:
+                        elements_list.append(parsed)
+                except Exception:
+                    # 降级：尝试解析为 Elements（可能有些子消息是 Elements 结构）
+                    try:
+                        els = element_pb2.Elements()
+                        els.ParseFromString(fwd_msg.messageBody)
+                        for e in els.elements:
+                            parsed = ElementParser.parse(e)
+                            if parsed:
+                                elements_list.append(parsed)
+                    except Exception as e:
+                        logger.warning(f"failed to parse forwarded message body: {e}")
+
+            # 构建 ParsedMessage（子消息）
+            parsed_msg = ParsedMessage(
+                msg_id=str(fwd_msg.msgId),
+                sender_uid=fwd_msg.senderUid,
+                sender_num=fwd_msg.senderNum,
+                timestamp=fwd_msg.timestampAlt if fwd_msg.timestampAlt else fwd_msg.timestamp,
+                elements=elements_list,
+            )
+            forwarded_messages.append(parsed_msg)
+
+        except Exception as e:
+            logger.warning(f"failed to parse forward cache at offset {offset}: {e}")
+            break
+
+    return forwarded_messages
+
+
+def _read_varint(buf: bytes, offset: int) -> tuple[int, int]:
+    """读取 protobuf varint，返回 (值, 新偏移量)"""
+    result = 0
+    shift = 0
+    while True:
+        if offset >= len(buf):
+            raise ValueError("varint extends beyond buffer")
+        byte = buf[offset]
+        offset += 1
+        result |= (byte & 0x7f) << shift
+        if not (byte & 0x80):
+            break
+        shift += 7
+    return result, offset
+
 
 @lru_cache(maxsize=4096)
 def compute_image_cache_path(md5: str, original: int, pic_path: Optional[Path]) -> Optional[Path]:

@@ -141,3 +141,16 @@ message RedPacket {
   string redPacketType = 48445;
   string summary = 48448;
 }
+
+// 合并转发消息的子消息结构（解析 40900 字段）
+message ForwardedMessage {
+  uint64 msgId = 40001;           // 子消息 ID
+  uint32 timestamp = 40002;       // 发送时间（秒级时间戳，需 *1000 转毫秒）
+  uint32 msgType = 40011;         // 消息类型（2=文本等）
+  string senderUid = 40020;       // 发送者 UID
+  uint32 senderNum = 40033;       // 发送者 QQ 号
+  uint32 timestampAlt = 40050;    // 另一个时间戳字段（通常与 40002 相同或更精确）
+  bytes messageBody = 40800;      // 标准 Elements protobuf（可递归解析）
+  uint32 quotedSeq = 40850;       // 被引用消息序列号（若此子消息引用了其他消息）
+  // 嵌套转发：子消息本身也可能是转发消息，递归包含更多 ForwardedMessage
+}

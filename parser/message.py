@@ -80,9 +80,18 @@ class MessageParser:
             ParsedElement 列表
         """
         elements = []
+        # 提取 40900 字段（合并转发缓存，仅当 msg_type==8 时有效）
+        forward_cache = None
+        if hasattr(msg, 'msg_type') and msg.msg_type == 8 and hasattr(msg, 'UNK_18'):
+            forward_cache = msg.UNK_18
+
         try:
             for element in msg.elements.elements:
-                parsed = ElementParser.parse(element)
+                # type=10 需要传入 forward_cache
+                if element.type == 10:
+                    parsed = ElementParser.parse(element, forward_cache)
+                else:
+                    parsed = ElementParser.parse(element)
                 if parsed:
                     elements.append(parsed)
         except Exception as e:
