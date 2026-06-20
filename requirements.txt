@@ -1,5 +1,5 @@
 humanize
-protobuf==6.33.6
+protobuf>=6.33.5,<7
 SQLAlchemy
 tqdm
 jinja2
