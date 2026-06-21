@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+venv-windows/
+env/
+ENV/
+
+# PyInstaller
+build/
+dist/
+# *.spec  # 保留 spec 配置文件
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+*.Zone.Identifier
+
+# Project specific
+output/
+*.db
+databases/
+chatpic/
+*.toml
+!example.toml
+
+# Temporary files
+*.log
+*.tmp
+.cache/
+
+# AI 辅助文档（本地供 Claude Code 加载，不纳入版本库）
+/CLAUDE.md
