@@ -430,34 +430,35 @@ def _parse_forward_cache(cache_bytes: bytes) -> list[ParsedMessage]:
             fwd_msg.ParseFromString(sub_msg_bytes)
 
             # 解析子消息的 messageBody（40800 字段）
-            # 注意：40800 直接是一个 Element，不是 Elements{repeated Element}
+            # 40800 是 Elements（repeated Element），与主消息解析逻辑一致
             elements_list = []
             if fwd_msg.messageBody:
                 try:
-                    # 尝试解析为单个 Element
-                    elem = element_pb2.Element()
-                    elem.ParseFromString(fwd_msg.messageBody)
-                    parsed = ElementParser.parse(elem)
-                    if parsed:
-                        elements_list.append(parsed)
+                    # 解析为 Elements（标准结构）
+                    els = element_pb2.Elements()
+                    els.ParseFromString(fwd_msg.messageBody)
+                    for e in els.elements:
+                        parsed = ElementParser.parse(e)
+                        if parsed:
+                            elements_list.append(parsed)
                 except Exception:
-                    # 降级：尝试解析为 Elements（可能有些子消息是 Elements 结构）
+                    # 降级：尝试解析为单个 Element（旧版兼容）
                     try:
-                        els = element_pb2.Elements()
-                        els.ParseFromString(fwd_msg.messageBody)
-                        for e in els.elements:
-                            parsed = ElementParser.parse(e)
-                            if parsed:
-                                elements_list.append(parsed)
+                        elem = element_pb2.Element()
+                        elem.ParseFromString(fwd_msg.messageBody)
+                        parsed = ElementParser.parse(elem)
+                        if parsed:
+                            elements_list.append(parsed)
                     except Exception as e:
                         logger.warning(f"failed to parse forwarded message body: {e}")
 
             # 构建 ParsedMessage（子消息）
+            # 优先使用 timestampAlt，但需用 is not None 判断以支持值为 0 的情况
             parsed_msg = ParsedMessage(
                 msg_id=str(fwd_msg.msgId),
                 sender_uid=fwd_msg.senderUid,
                 sender_num=fwd_msg.senderNum,
-                timestamp=fwd_msg.timestampAlt if fwd_msg.timestampAlt else fwd_msg.timestamp,
+                timestamp=fwd_msg.timestampAlt if fwd_msg.timestampAlt is not None and fwd_msg.timestampAlt != 0 else fwd_msg.timestamp,
                 elements=elements_list,
             )
             forwarded_messages.append(parsed_msg)
