@@ -281,21 +281,39 @@ class HTMLExporter(BaseExporter):
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
+        from parser.elements import compute_image_cache_path
+
         md5 = content.get('md5')
         if not md5:
             return '<div class="text">[图片]</div>'
 
-        # 查找已落地的图片（在 resources/images/ 目录）
-        resources_dir = self.output_path.parent / 'resources' / 'images'
-        if not resources_dir.exists():
-            return '<div class="text">[图片]</div>'
+        # 检查是否复制资源
+        copy_resources = self.config.get('copy_resources', True)
 
-        # 尝试找到对应的图片文件
-        for img_file in resources_dir.iterdir():
-            if img_file.stem == md5:
-                # 相对路径（相对于 HTML 文件）
-                rel_path = f"resources/images/{img_file.name}"
-                return f'<img src="{rel_path}" class="message-image" onclick="showImage(\'{rel_path}\')" alt="图片">'
+        if copy_resources:
+            # 模式 1：使用已复制到 resources/images/ 的图片
+            resources_dir = self.output_path.parent / 'resources' / 'images'
+            if resources_dir.exists():
+                # 尝试找到对应的图片文件
+                for img_file in resources_dir.iterdir():
+                    if img_file.stem == md5:
+                        # 相对路径（相对于 HTML 文件）
+                        rel_path = f"resources/images/{img_file.name}"
+                        return f'<img src="{rel_path}" class="message-image" onclick="showImage(\'{rel_path}\')" alt="图片">'
+        else:
+            # 模式 2：直接指向原始 pic_path 目录
+            pic_path = self.config.get('pic_path')
+            if pic_path:
+                pic_path_obj = Path(pic_path)
+                original = content.get('original', 0)
+                src_path = compute_image_cache_path(md5, original, pic_path_obj)
+
+                if src_path and src_path.exists():
+                    # 使用绝对路径或相对路径（相对于 HTML 文件）
+                    # Windows: file:///C:/path/to/image.jpg
+                    # Linux: file:///path/to/image.jpg
+                    file_url = src_path.as_uri()
+                    return f'<img src="{file_url}" class="message-image" onclick="showImage(\'{file_url}\')" alt="图片">'
 
         return '<div class="text">[图片]</div>'
 

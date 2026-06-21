@@ -9,6 +9,9 @@ group_filters = [] # 需要输出的群聊消息的群号列表，留空导出�
 # 导出格式：chatlab_json（ChatLab JSON）、chatlab_jsonl（ChatLab JSONL）、html（HTML 单文件）
 output_format = ["chatlab_json", "html"]
 
+# 是否复制资源文件到导出目录（true=复制到 output/resources/，false=HTML 直接指向 pic_path）
+copy_resources = true
+
 # ============================================================================
 # 媒体资源落地（可选配置，未来扩展）
 # ============================================================================
