@@ -119,12 +119,16 @@ class HTMLExporter(BaseExporter):
         chat_type = '群聊' if meta.get('type') == 'group' else '私聊'
         export_time = datetime.fromtimestamp(int(time.time())).strftime('%Y-%m-%d %H:%M')
 
+        # 构建消息 ID 映射（用于引用查找）
+        all_messages = [msg for _, msgs in messages_by_date for msg in msgs]
+        message_map = {msg.msg_id: msg for msg in all_messages}
+
         # 渲染日期块
         date_blocks_html = []
         for date_str, msgs in messages_by_date:
             msgs_html = []
             for msg in msgs:
-                msgs_html.append(self._render_message(msg, member_map, owner_id, avatar_map))
+                msgs_html.append(self._render_message(msg, member_map, owner_id, avatar_map, message_map))
 
             date_blocks_html.append(f'''
 <details class="date-block" open>
@@ -147,7 +151,8 @@ class HTMLExporter(BaseExporter):
         msg: ParsedMessage,
         member_map: dict[str, ParsedMember],
         owner_id: str,
-        avatar_map: dict[str, str]
+        avatar_map: dict[str, str],
+        message_map: dict[str, ParsedMessage]
     ) -> str:
         """渲染单条消息"""
         is_self = (msg.sender_uid == owner_id)
@@ -159,7 +164,7 @@ class HTMLExporter(BaseExporter):
         # 检查是否为系统消息
         if msg.elements and msg.elements[0].type == ElementType.NOTICE:
             notice_text = self._format_notice_text(msg.elements[0].content, member_map)
-            return f'<div class="system-message"><span class="system-text">{html.escape(notice_text)}</span></div>'
+            return f'<div class="system-message" id="msg-{html.escape(msg.msg_id)}"><span class="system-text">{html.escape(notice_text)}</span></div>'
 
         # 格式化时间
         time_str = datetime.fromtimestamp(msg.timestamp).strftime('%H:%M')
@@ -175,17 +180,36 @@ class HTMLExporter(BaseExporter):
         # 构建消息内容
         content_html = self._render_message_content(msg.elements, member_map)
 
-        # 引用消息（TODO: 需要找到被引用的消息内容）
+        # 引用消息（查找被引用的消息内容）
         quoted_html = ''
         if msg.quoted_msg_id:
-            quoted_html = f'''
+            quoted_msg = message_map.get(msg.quoted_msg_id)
+            if quoted_msg:
+                # 获取被引用消息的发送者
+                quoted_sender = member_map.get(quoted_msg.sender_uid)
+                quoted_sender_name = quoted_sender.get_display_name() if quoted_sender else quoted_msg.sender_uid
+
+                # 获取被引用消息的内容（简化版，只取文本）
+                quoted_content = self._extract_text_content(quoted_msg.elements)
+                if len(quoted_content) > 50:
+                    quoted_content = quoted_content[:50] + '...'
+
+                quoted_html = f'''
+<div class="quote" onclick="scrollToMessage('{html.escape(msg.quoted_msg_id)}')">
+    <div class="quote-sender">{html.escape(quoted_sender_name)}</div>
+    <div class="quote-content">{html.escape(quoted_content)}</div>
+</div>
+            '''
+            else:
+                # 被引用的消息不存在（可能在导出范围外）
+                quoted_html = f'''
 <div class="quote">
-    <div class="quote-content">回复了一条消息</div>
+    <div class="quote-content">引用了一条消息</div>
 </div>
             '''
 
         return f'''
-<div class="message-group {'is-self' if is_self else 'is-other'}">
+<div class="message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}">
     <div class="avatar">{avatar_html}</div>
     <div class="message-wrapper">
         <div class="meta">
@@ -316,6 +340,25 @@ class HTMLExporter(BaseExporter):
     {more_html}
 </div>
         '''
+
+    def _extract_text_content(self, elements: list) -> str:
+        """提取消息的纯文本内容（用于引用预览）"""
+        parts = []
+        for elem in elements:
+            if elem.type == ElementType.TEXT:
+                parts.append(elem.content.get('text', ''))
+            elif elem.type == ElementType.IMAGE:
+                parts.append('[图片]')
+            elif elem.type == ElementType.FILE:
+                parts.append('[文件]')
+            elif elem.type == ElementType.VOICE:
+                parts.append('[语音]')
+            elif elem.type == ElementType.VIDEO:
+                parts.append('[视频]')
+            elif elem.type in (ElementType.EMOJI, ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
+                text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
+                parts.append(text)
+        return ''.join(parts) or '[消息]'
 
     def _format_notice_text(self, content: dict, member_map: dict[str, ParsedMember]) -> str:
         """格式化系统提示文本"""
@@ -615,10 +658,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 8px;
             margin-bottom: 6px;
             font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-left: 3px solid var(--bubble-self);
+        }}
+
+        .quote:hover {{
+            background: rgba(0, 0, 0, 0.15);
         }}
 
         .is-self .quote {{
             background: rgba(255, 255, 255, 0.2);
+        }}
+
+        .is-self .quote:hover {{
+            background: rgba(255, 255, 255, 0.3);
+        }}
+
+        .quote-sender {{
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 4px;
+            color: var(--bubble-self);
+        }}
+
+        .quote-content {{
+            opacity: 0.9;
+        }}
+
+        /* 消息高亮动画 */
+        @keyframes highlightMessage {{
+            0%, 100% {{
+                background: transparent;
+            }}
+            50% {{
+                background: rgba(255, 235, 59, 0.3);
+            }}
+        }}
+
+        .message-highlight {{
+            animation: highlightMessage 2s ease;
         }}
 
         /* 转发消息 */
@@ -891,6 +970,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     node.parentNode.replaceChild(fragment, node);
                 }}
             }});
+        }}
+
+        // 跳转到引用的消息
+        function scrollToMessage(msgId) {{
+            const targetMsg = document.getElementById('msg-' + msgId);
+            if (!targetMsg) {{
+                return; // 消息不在当前导出范围内
+            }}
+
+            // 展开目标消息所在的日期块
+            let parent = targetMsg.parentElement;
+            while (parent) {{
+                if (parent.tagName === 'DETAILS') {{
+                    parent.open = true;
+                    break;
+                }}
+                parent = parent.parentElement;
+            }}
+
+            // 滚动到目标消息
+            targetMsg.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+
+            // 添加高亮动画
+            targetMsg.classList.add('message-highlight');
+            setTimeout(() => {{
+                targetMsg.classList.remove('message-highlight');
+            }}, 2000);
         }}
 
         // 键盘快捷键
