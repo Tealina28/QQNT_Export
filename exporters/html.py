@@ -168,15 +168,28 @@ class HTMLExporter(BaseExporter):
         all_messages = [msg for _, msgs in messages_by_date for msg in msgs]
         message_map = {msg.msg_id: msg for msg in all_messages}
 
+        # 生成时间轴项
+        timeline_items_html = []
+        for date_str, msgs in messages_by_date:
+            # 生成锚点 ID（使用日期字符串）
+            date_id = date_str.replace(' ', '-').replace('/', '-')
+            timeline_items_html.append(f'''
+<div class="timeline-item" onclick="scrollToDate('{date_id}')">
+    <div class="date">{date_str}</div>
+    <div class="count">{len(msgs)} 条消息</div>
+</div>
+            ''')
+
         # 渲染日期块
         date_blocks_html = []
         for date_str, msgs in messages_by_date:
+            date_id = date_str.replace(' ', '-').replace('/', '-')
             msgs_html = []
             for msg in msgs:
                 msgs_html.append(self._render_message(msg, member_map, owner_id, avatar_map, message_map))
 
             date_blocks_html.append(f'''
-<details class="date-block" open>
+<details class="date-block" open id="date-{date_id}">
     <summary>{date_str} ({len(msgs)} 条)</summary>
     <div class="messages">
         {''.join(msgs_html)}
@@ -188,7 +201,8 @@ class HTMLExporter(BaseExporter):
             chat_name=chat_name,
             chat_type=chat_type,
             export_time=export_time,
-            date_blocks=''.join(date_blocks_html)
+            date_blocks=''.join(date_blocks_html),
+            timeline_items=''.join(timeline_items_html)
         )
 
     def _render_message(
@@ -278,6 +292,10 @@ class HTMLExporter(BaseExporter):
         parts = []
 
         for elem in elements:
+            # 跳过 QUOTE 类型（引用消息已在外层处理）
+            if elem.type == ElementType.QUOTE:
+                continue
+
             if elem.type == ElementType.TEXT:
                 text = html.escape(elem.content.get('text', ''))
                 # 简单换行处理
@@ -416,6 +434,10 @@ class HTMLExporter(BaseExporter):
         """提取消息的纯文本内容（用于引用预览）"""
         parts = []
         for elem in elements:
+            # 跳过 QUOTE 类型（避免递归引用）
+            if elem.type == ElementType.QUOTE:
+                continue
+
             if elem.type == ElementType.TEXT:
                 parts.append(elem.content.get('text', ''))
             elif elem.type == ElementType.IMAGE:
@@ -607,6 +629,98 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
+        }}
+
+        #timelineToggle {{
+            background: var(--bg-secondary);
+            border: none;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }}
+
+        /* 时间轴侧边栏 */
+        .timeline-sidebar {{
+            position: fixed;
+            right: -300px;
+            top: 0;
+            width: 300px;
+            height: 100vh;
+            background: var(--bg-primary);
+            border-left: 1px solid var(--border);
+            box-shadow: -2px 0 8px rgba(0,0,0,0.1);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }}
+
+        .timeline-sidebar.active {{
+            right: 0;
+        }}
+
+        .timeline-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }}
+
+        .timeline-header h3 {{
+            margin: 0;
+            font-size: 16px;
+            color: var(--text-primary);
+        }}
+
+        .timeline-close {{
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+
+        .timeline-content {{
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }}
+
+        .timeline-item {{
+            padding: 12px 16px;
+            margin: 4px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 14px;
+            color: var(--text-primary);
+        }}
+
+        .timeline-item:hover {{
+            background: var(--bg-secondary);
+        }}
+
+        .timeline-item .date {{
+            font-weight: 600;
+            margin-bottom: 4px;
+        }}
+
+        .timeline-item .count {{
+            font-size: 12px;
+            color: var(--text-secondary);
         }}
 
         /* Main */
@@ -902,8 +1016,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="header-actions">
             <input type="text" id="searchInput" placeholder="搜索消息..." class="search-input">
             <button id="themeToggle">🌙</button>
+            <button id="timelineToggle" title="时间轴">📅</button>
         </div>
     </header>
+
+    <div class="timeline-sidebar" id="timelineSidebar">
+        <div class="timeline-header">
+            <h3>时间轴</h3>
+            <button class="timeline-close" onclick="toggleTimeline()">×</button>
+        </div>
+        <div class="timeline-content">
+            {timeline_items}
+        </div>
+    </div>
 
     <main>
         {date_blocks}
@@ -929,6 +1054,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             localStorage.setItem('theme', next);
             themeToggle.textContent = next === 'dark' ? '☀️' : '🌙';
         }};
+
+        // 时间轴切换
+        const timelineToggle = document.getElementById('timelineToggle');
+        const timelineSidebar = document.getElementById('timelineSidebar');
+
+        function toggleTimeline() {{
+            timelineSidebar.classList.toggle('active');
+        }}
+
+        timelineToggle.onclick = toggleTimeline;
 
         // 图片预览
         function showImage(src) {{
@@ -1068,6 +1203,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             setTimeout(() => {{
                 targetMsg.classList.remove('message-highlight');
             }}, 2000);
+        }}
+
+        // 滚动到指定日期
+        function scrollToDate(dateId) {{
+            const targetDate = document.getElementById('date-' + dateId);
+            if (!targetDate) {{
+                return;
+            }}
+
+            // 展开日期块
+            targetDate.open = true;
+
+            // 滚动到日期块
+            targetDate.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+
+            // 关闭时间轴
+            toggleTimeline();
         }}
 
         // 键盘快捷键
