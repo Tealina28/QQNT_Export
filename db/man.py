@@ -57,6 +57,14 @@ class DatabaseManager:
 
         return queries
 
+    def self_uid_mapping(self):
+        """返回 uid 映射表的首项，即当前登录账号自身。
+
+        nt_uid_mapping_table 的第一条（按主键 48901 升序）恒为本账号，
+        据此可直接取到当前账号的 uid 与 qq 号，无需扫描消息反推。
+        """
+        model = self._models["nt_msg"]["nt_uid_mapping_table"]
+        return self.session.query(model).order_by(model.id).first()
 
     def group_messages(self, filters):
         model = self._models["nt_msg"]["group_msg_table"]

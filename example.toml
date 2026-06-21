@@ -1,9 +1,22 @@
 db_path = ".\\databases\\" # 解密后的数据库目录路径
-pic_path = ".\\chatpic\\" # chatpic目录路径，留空不导出完整路径
+pic_path = ".\\chatpic\\" # chatpic目录路径，留空则不导出图片资源
 
 output_path = "" # 导出的路径，留空默认为数据库上级目录
 
-c2c_filters = [123456,654321] # 需要输出的私聊消息的QQ号列表，留空导出全部
-group_filters = [654321,123456] # 需要输出的群聊消息的群号列表，留空导出全部
+c2c_filters = [] # 需要输出的私聊消息的QQ号列表，留空导出全部
+group_filters = [] # 需要输出的群聊消息的群号列表，留空导出全部
 
-output_format = ["txt", "json"] # 需要导出的文件格式
+# 导出格式：chatlab_json（ChatLab JSON）、chatlab_jsonl（ChatLab JSONL）、html（HTML 单文件）
+output_format = ["chatlab_json", "html"]
+
+# 是否复制资源文件到导出目录（true=复制到 output/resources/，false=HTML 直接指向 pic_path）
+copy_resources = true
+
+# ============================================================================
+# 媒体资源落地（可选配置，未来扩展）
+# ============================================================================
+# ptt_path = ""           # 语音缓存目录（待提供后激活语音落地）
+# video_path = ""         # 视频缓存目录（待提供后激活视频落地）
+# file_path = ""          # 文件缓存目录（待提供后激活文件落地）
+# silk_transcode = false  # 是否启用 silk→mp3 转码（需 graiax-silkcoder 库）
+
