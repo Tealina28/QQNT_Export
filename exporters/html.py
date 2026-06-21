@@ -32,6 +32,9 @@ class HTMLExporter(BaseExporter):
         # 获取所有者 ID（判断"我"）
         owner_id = meta.get('ownerId', '')
 
+        # 构建头像映射（从数据库查询）
+        avatar_map = self._build_avatar_map(members)
+
         # 按日期分组消息
         messages_by_date = self._group_messages_by_date(messages)
 
@@ -41,7 +44,8 @@ class HTMLExporter(BaseExporter):
             members=members,
             messages_by_date=messages_by_date,
             member_map=member_map,
-            owner_id=owner_id
+            owner_id=owner_id,
+            avatar_map=avatar_map
         )
 
         # 写入文件
@@ -50,6 +54,40 @@ class HTMLExporter(BaseExporter):
 
     def get_file_extension(self) -> str:
         return '.html'
+
+    def _build_avatar_map(self, members: list[ParsedMember]) -> dict[str, str]:
+        """构建头像映射（uid -> avatar_url）
+
+        从数据库查询头像 URL（列 20004），添加参数 s=100
+        """
+        from db import DatabaseManager
+
+        avatar_map = {}
+
+        # 获取 DatabaseManager 实例（从 config 的 db_path）
+        db_path = self.config.get('db_path')
+        if not db_path:
+            return avatar_map
+
+        try:
+            from pathlib import Path
+            dbman = DatabaseManager(Path(db_path))
+
+            for member in members:
+                profile = dbman.profile_info(member.platform_id)
+                if profile and profile.avatar_url:
+                    # 头像 URL 需要带参数 s=100（缩略图）
+                    avatar_url = profile.avatar_url
+                    if '?' in avatar_url:
+                        avatar_url += '&s=100'
+                    else:
+                        avatar_url += '?s=100'
+                    avatar_map[member.platform_id] = avatar_url
+        except Exception:
+            # 静默失败，不影响导出
+            pass
+
+        return avatar_map
 
     def _group_messages_by_date(self, messages: list[ParsedMessage]) -> list[tuple[str, list[ParsedMessage]]]:
         """按日期分组消息
@@ -73,7 +111,8 @@ class HTMLExporter(BaseExporter):
         members: list[ParsedMember],
         messages_by_date: list[tuple[str, list[ParsedMessage]]],
         member_map: dict[str, ParsedMember],
-        owner_id: str
+        owner_id: str,
+        avatar_map: dict[str, str]
     ) -> str:
         """渲染完整 HTML"""
         chat_name = html.escape(meta.get('name', '聊天记录'))
@@ -85,15 +124,15 @@ class HTMLExporter(BaseExporter):
         for date_str, msgs in messages_by_date:
             msgs_html = []
             for msg in msgs:
-                msgs_html.append(self._render_message(msg, member_map, owner_id))
+                msgs_html.append(self._render_message(msg, member_map, owner_id, avatar_map))
 
             date_blocks_html.append(f'''
-                <details class="date-block" open>
-                    <summary>{date_str} ({len(msgs)} 条)</summary>
-                    <div class="messages">
-                        {''.join(msgs_html)}
-                    </div>
-                </details>
+<details class="date-block" open>
+    <summary>{date_str} ({len(msgs)} 条)</summary>
+    <div class="messages">
+        {''.join(msgs_html)}
+    </div>
+</details>
             ''')
 
         return HTML_TEMPLATE.format(
@@ -107,7 +146,8 @@ class HTMLExporter(BaseExporter):
         self,
         msg: ParsedMessage,
         member_map: dict[str, ParsedMember],
-        owner_id: str
+        owner_id: str,
+        avatar_map: dict[str, str]
     ) -> str:
         """渲染单条消息"""
         is_self = (msg.sender_uid == owner_id)
@@ -124,8 +164,13 @@ class HTMLExporter(BaseExporter):
         # 格式化时间
         time_str = datetime.fromtimestamp(msg.timestamp).strftime('%H:%M')
 
-        # 头像（首字母）
-        avatar_char = sender_name[0] if sender_name else '?'
+        # 头像（优先使用图片 URL，回退到首字母）
+        avatar_url = avatar_map.get(msg.sender_uid)
+        if avatar_url:
+            avatar_html = f'<img src="{html.escape(avatar_url)}" alt="{html.escape(sender_name)}" class="avatar-img">'
+        else:
+            avatar_char = sender_name[0] if sender_name else '?'
+            avatar_html = html.escape(avatar_char)
 
         # 构建消息内容
         content_html = self._render_message_content(msg.elements, member_map)
@@ -134,25 +179,25 @@ class HTMLExporter(BaseExporter):
         quoted_html = ''
         if msg.quoted_msg_id:
             quoted_html = f'''
-                <div class="quote">
-                    <div class="quote-content">回复了一条消息</div>
-                </div>
+<div class="quote">
+    <div class="quote-content">回复了一条消息</div>
+</div>
             '''
 
         return f'''
-            <div class="message-group {'is-self' if is_self else 'is-other'}">
-                <div class="avatar">{html.escape(avatar_char)}</div>
-                <div class="message-wrapper">
-                    <div class="meta">
-                        <span class="sender">{html.escape(sender_name)}</span>
-                        <span class="time">{time_str}</span>
-                    </div>
-                    <div class="bubble">
-                        {quoted_html}
-                        {content_html}
-                    </div>
-                </div>
-            </div>
+<div class="message-group {'is-self' if is_self else 'is-other'}">
+    <div class="avatar">{avatar_html}</div>
+    <div class="message-wrapper">
+        <div class="meta">
+            <span class="sender">{html.escape(sender_name)}</span>
+            <span class="time">{time_str}</span>
+        </div>
+        <div class="bubble">
+            {quoted_html}
+            {content_html}
+        </div>
+    </div>
+</div>
         '''
 
     def _render_message_content(
@@ -255,9 +300,9 @@ class HTMLExporter(BaseExporter):
                 content = content[:50] + '...'
 
             items.append(f'''
-                <div class="forward-item">
-                    <span class="forward-sender">{html.escape(sender_name)}</span>: {html.escape(content)}
-                </div>
+<div class="forward-item">
+    <span class="forward-sender">{html.escape(sender_name)}</span>: {html.escape(content)}
+</div>
             ''')
 
         more_html = ''
@@ -265,11 +310,11 @@ class HTMLExporter(BaseExporter):
             more_html = f'<div class="forward-more">还有 {len(forward_messages) - 10} 条...</div>'
 
         return f'''
-            <div class="forward-container">
-                <div class="forward-header">聊天记录 ({len(forward_messages)} 条)</div>
-                {''.join(items)}
-                {more_html}
-            </div>
+<div class="forward-container">
+    <div class="forward-header">聊天记录 ({len(forward_messages)} 条)</div>
+    {''.join(items)}
+    {more_html}
+</div>
         '''
 
     def _format_notice_text(self, content: dict, member_map: dict[str, ParsedMember]) -> str:
@@ -407,12 +452,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         header .meta {{
             font-size: 14px;
             color: var(--text-secondary);
+            margin-bottom: 16px;
+        }}
+
+        .header-actions {{
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            max-width: 500px;
+            margin: 0 auto;
+        }}
+
+        .search-input {{
+            flex: 1;
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s;
+        }}
+
+        .search-input:focus {{
+            border-color: var(--bubble-self);
+            background: var(--bg-primary);
         }}
 
         #themeToggle {{
-            position: absolute;
-            top: 20px;
-            right: 20px;
             background: var(--bg-secondary);
             border: none;
             border-radius: 50%;
@@ -423,6 +492,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: center;
+            flex-shrink: 0;
         }}
 
         /* Main */
@@ -477,6 +547,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: center;
             font-weight: 600;
             flex-shrink: 0;
+            overflow: hidden;
+        }}
+
+        .avatar-img {{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }}
 
         .message-wrapper {{
@@ -617,6 +694,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 8px;
         }}
 
+        /* 搜索高亮 */
+        .message-group.hidden {{
+            display: none;
+        }}
+
+        .highlight {{
+            background: #FFEB3B;
+            color: #000;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }}
+
+        [data-theme="dark"] .highlight {{
+            background: #FBC02D;
+            color: #000;
+        }}
+
         /* 响应式 */
         @media (max-width: 600px) {{
             main {{
@@ -631,9 +725,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 font-size: 20px;
             }}
 
+            header {{
+                padding: 15px;
+            }}
+
+            .header-actions {{
+                flex-direction: column;
+                width: 100%;
+            }}
+
+            .search-input {{
+                width: 100%;
+            }}
+
             #themeToggle {{
-                top: 15px;
-                right: 15px;
                 width: 32px;
                 height: 32px;
             }}
@@ -644,7 +749,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <header>
         <h1>{chat_name}</h1>
         <div class="meta">{chat_type} | 导出时间: {export_time}</div>
-        <button id="themeToggle">🌙</button>
+        <div class="header-actions">
+            <input type="text" id="searchInput" placeholder="搜索消息..." class="search-input">
+            <button id="themeToggle">🌙</button>
+        </div>
     </header>
 
     <main>
@@ -684,9 +792,117 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.getElementById('imageModal').style.display = 'none';
         }}
 
+        // 搜索功能
+        const searchInput = document.getElementById('searchInput');
+        let searchTimeout;
+
+        searchInput.addEventListener('input', (e) => {{
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {{
+                const query = e.target.value.toLowerCase().trim();
+                const messages = document.querySelectorAll('.message-group');
+                const dateBlocks = document.querySelectorAll('.date-block');
+
+                if (!query) {{
+                    // 清空搜索，显示所有消息
+                    messages.forEach(msg => msg.classList.remove('hidden'));
+                    dateBlocks.forEach(block => block.open = true);
+                    // 移除所有高亮
+                    document.querySelectorAll('.highlight').forEach(el => {{
+                        const text = el.textContent;
+                        el.outerHTML = text;
+                    }});
+                    return;
+                }}
+
+                let hasVisibleMessages = false;
+
+                dateBlocks.forEach(block => {{
+                    const blockMessages = block.querySelectorAll('.message-group');
+                    let blockHasVisible = false;
+
+                    blockMessages.forEach(msg => {{
+                        // 移除旧高亮
+                        msg.querySelectorAll('.highlight').forEach(el => {{
+                            const text = el.textContent;
+                            el.outerHTML = text;
+                        }});
+
+                        const text = msg.textContent.toLowerCase();
+                        if (text.includes(query)) {{
+                            msg.classList.remove('hidden');
+                            blockHasVisible = true;
+                            hasVisibleMessages = true;
+
+                            // 高亮匹配文本
+                            const bubble = msg.querySelector('.bubble');
+                            if (bubble) {{
+                                highlightText(bubble, query);
+                            }}
+                        }} else {{
+                            msg.classList.add('hidden');
+                        }}
+                    }});
+
+                    // 展开有匹配的日期块
+                    block.open = blockHasVisible;
+                }});
+            }}, 300); // 防抖 300ms
+        }});
+
+        function highlightText(element, query) {{
+            const walker = document.createTreeWalker(
+                element,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+
+            const nodesToReplace = [];
+            let node;
+
+            while (node = walker.nextNode()) {{
+                const text = node.textContent.toLowerCase();
+                if (text.includes(query)) {{
+                    nodesToReplace.push(node);
+                }}
+            }}
+
+            nodesToReplace.forEach(node => {{
+                const text = node.textContent;
+                const lowerText = text.toLowerCase();
+                const index = lowerText.indexOf(query);
+
+                if (index !== -1) {{
+                    const before = text.substring(0, index);
+                    const match = text.substring(index, index + query.length);
+                    const after = text.substring(index + query.length);
+
+                    const fragment = document.createDocumentFragment();
+                    if (before) fragment.appendChild(document.createTextNode(before));
+
+                    const mark = document.createElement('span');
+                    mark.className = 'highlight';
+                    mark.textContent = match;
+                    fragment.appendChild(mark);
+
+                    if (after) fragment.appendChild(document.createTextNode(after));
+
+                    node.parentNode.replaceChild(fragment, node);
+                }}
+            }});
+        }}
+
         // 键盘快捷键
         document.addEventListener('keydown', (e) => {{
-            if (e.key === 'Escape') closeModal();
+            if (e.key === 'Escape') {{
+                closeModal();
+                searchInput.blur();
+            }}
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {{
+                e.preventDefault();
+                searchInput.focus();
+            }}
         }});
     </script>
 </body>
