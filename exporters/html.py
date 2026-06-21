@@ -164,9 +164,10 @@ class HTMLExporter(BaseExporter):
         chat_type = '群聊' if meta.get('type') == 'group' else '私聊'
         export_time = datetime.fromtimestamp(int(time.time())).strftime('%Y-%m-%d %H:%M')
 
-        # 构建消息 ID 映射（用于引用查找）
+        # 构建消息映射（用于引用查找）
         all_messages = [msg for _, msgs in messages_by_date for msg in msgs]
-        message_map = {msg.msg_id: msg for msg in all_messages}
+        # 用 seq 建立映射（quoted_msg_id 是 seq）
+        message_map = {str(msg.seq): msg for msg in all_messages}
 
         # 生成时间轴项
         timeline_items_html = []
@@ -335,6 +336,24 @@ class HTMLExporter(BaseExporter):
             elif elem.type == ElementType.RED_PACKET:
                 prompt = html.escape(elem.content.get('prompt', ''))
                 parts.append(f'<div class="text">[红包: {prompt}]</div>')
+
+            elif elem.type == ElementType.FEED:
+                title = elem.content.get('title')
+                content = elem.content.get('content')
+                url = elem.content.get('url')
+
+                feed_parts = []
+                if title:
+                    feed_parts.append(f'<strong>{html.escape(title)}</strong>')
+                if content:
+                    feed_parts.append(html.escape(content))
+                if url:
+                    feed_parts.append(f'<a href="{html.escape(url)}" target="_blank">查看详情</a>')
+
+                if feed_parts:
+                    parts.append(f'<div class="text">📰 {" | ".join(feed_parts)}</div>')
+                else:
+                    parts.append('<div class="text">[动态]</div>')
 
             else:
                 # 其他类型暂时用占位符

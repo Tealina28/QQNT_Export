@@ -53,16 +53,18 @@ class ParsedMessage:
 
     Attributes:
         msg_id: 消息 ID
+        seq: 消息序列号
         sender_uid: 发送者 UID
         sender_num: 发送者 QQ 号
         timestamp: 时间戳（秒级）
         elements: 消息元素列表
-        quoted_msg_id: 引用的消息 ID（可选）
+        quoted_msg_id: 引用的消息 seq（可选）
         group_num: 群号（群聊消息）
         sender_nickname: 发送者昵称（群聊）
         sender_card: 发送者群名片（群聊）
     """
     msg_id: str
+    seq: int
     sender_uid: str
     sender_num: int
     timestamp: int

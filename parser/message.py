@@ -39,6 +39,7 @@ class MessageParser:
 
         return ParsedMessage(
             msg_id=str(msg.id),
+            seq=msg.seq,
             sender_uid=msg.sender_uid,
             sender_num=msg.sender_num,
             timestamp=msg.time,
@@ -59,6 +60,7 @@ class MessageParser:
 
         return ParsedMessage(
             msg_id=str(msg.id),
+            seq=msg.seq,
             sender_uid=msg.sender_uid,
             sender_num=msg.sender_num,
             timestamp=msg.time,
