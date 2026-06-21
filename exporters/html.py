@@ -346,7 +346,7 @@ class HTMLExporter(BaseExporter):
                         rel_path = f"resources/images/{img_file.name}"
                         return f'<img src="{rel_path}" class="message-image" onclick="showImage(\'{rel_path}\')" alt="图片">'
         else:
-            # 模式 2：直接指向原始 pic_path 目录
+            # 模式 2：直接指向原始 pic_path 目录（使用相对路径）
             pic_path = self.config.get('pic_path')
             if pic_path:
                 pic_path_obj = Path(pic_path)
@@ -354,11 +354,19 @@ class HTMLExporter(BaseExporter):
                 src_path = compute_image_cache_path(md5, original, pic_path_obj)
 
                 if src_path and src_path.exists():
-                    # 使用绝对路径或相对路径（相对于 HTML 文件）
-                    # Windows: file:///C:/path/to/image.jpg
-                    # Linux: file:///path/to/image.jpg
-                    file_url = src_path.as_uri()
-                    return f'<img src="{file_url}" class="message-image" onclick="showImage(\'{file_url}\')" alt="图片">'
+                    # 计算从 HTML 文件到图片的相对路径
+                    try:
+                        # 使用 os.path.relpath 计算相对路径
+                        # output/c2c/张三.html -> ../../../mnt/d/chatpic/chatimg/xxx/Cache_xxx
+                        import os
+                        html_file = self.output_path.absolute()
+                        img_file = src_path.absolute()
+                        rel_path = os.path.relpath(img_file, html_file.parent)
+                        rel_path_str = rel_path.replace('\\', '/')
+                        return f'<img src="{rel_path_str}" class="message-image" onclick="showImage(\'{rel_path_str}\')" alt="图片">'
+                    except Exception:
+                        # 失败时显示占位符
+                        return '<div class="text">[图片]</div>'
 
         return '<div class="text">[图片]</div>'
 
