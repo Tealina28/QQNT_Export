@@ -743,6 +743,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex: 1;
             overflow-y: auto;
             padding: 10px;
+            /* 确保滚动条不被遮挡 */
+            padding-right: 4px;
+        }}
+
+        /* 自定义滚动条样式（可选） */
+        .timeline-content::-webkit-scrollbar {{
+            width: 8px;
+        }}
+
+        .timeline-content::-webkit-scrollbar-track {{
+            background: var(--bg-secondary);
+            border-radius: 4px;
+        }}
+
+        .timeline-content::-webkit-scrollbar-thumb {{
+            background: var(--border);
+            border-radius: 4px;
+        }}
+
+        .timeline-content::-webkit-scrollbar-thumb:hover {{
+            background: var(--text-secondary);
         }}
 
         .timeline-item {{
