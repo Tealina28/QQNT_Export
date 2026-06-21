@@ -174,6 +174,9 @@ def export_group_conversation(
     # 获取群成员信息
     members = parser.get_all_group_members(group_num)
 
+    # 获取当前账号信息（用于判断"我"）
+    self_member = parser.get_self_member()
+
     # 构建 meta
     meta = {
         'name': conversation_name,
@@ -181,6 +184,8 @@ def export_group_conversation(
         'type': 'group',
         'groupId': group_id
     }
+    if self_member:
+        meta['ownerId'] = self_member.platform_id
 
     # 导出
     for format_name in output_formats:
