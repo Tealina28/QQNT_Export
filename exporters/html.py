@@ -694,21 +694,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* 时间轴侧边栏 */
         .timeline-sidebar {{
             position: fixed;
-            right: -300px;
+            left: -300px;
             top: 0;
             width: 300px;
             height: 100vh;
             background: var(--bg-primary);
-            border-left: 1px solid var(--border);
-            box-shadow: -2px 0 8px rgba(0,0,0,0.1);
-            transition: right 0.3s ease;
+            border-right: 1px solid var(--border);
+            box-shadow: 2px 0 8px rgba(0,0,0,0.1);
+            transition: left 0.3s ease;
             z-index: 1000;
             display: flex;
             flex-direction: column;
         }}
 
         .timeline-sidebar.active {{
-            right: 0;
+            left: 0;
         }}
 
         .timeline-header {{
