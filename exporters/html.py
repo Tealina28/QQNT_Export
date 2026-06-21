@@ -26,6 +26,11 @@ class HTMLExporter(BaseExporter):
         """导出为 HTML 格式"""
         self.ensure_output_dir()
 
+        # 如果需要复制资源，先创建资源目录并复制图片
+        copy_resources = self.config.get('copy_resources', True)
+        if copy_resources:
+            self._prepare_resources(messages)
+
         # 构建成员映射
         member_map = {m.platform_id: m for m in members}
 
@@ -54,6 +59,46 @@ class HTMLExporter(BaseExporter):
 
     def get_file_extension(self) -> str:
         return '.html'
+
+    def _prepare_resources(self, messages: list[ParsedMessage]):
+        """准备资源文件（复制图片到 resources 目录）"""
+        import shutil
+        from parser.elements import compute_image_cache_path
+
+        # 创建资源目录
+        resources_dir = self.output_path.parent / 'resources'
+        resources_dir.mkdir(exist_ok=True)
+        images_dir = resources_dir / 'images'
+        images_dir.mkdir(exist_ok=True)
+
+        # 获取 pic_path
+        pic_path = self.config.get('pic_path')
+        if not pic_path:
+            return
+
+        pic_path_obj = Path(pic_path)
+        if not pic_path_obj.exists():
+            return
+
+        # 遍历所有消息，复制图片
+        for msg in messages:
+            for elem in msg.elements:
+                if elem.type == ElementType.IMAGE:
+                    md5 = elem.content.get('md5')
+                    original = elem.content.get('original', 0)
+                    if md5:
+                        src_path = compute_image_cache_path(md5, original, pic_path_obj)
+                        if src_path and src_path.exists():
+                            ext = src_path.suffix or '.jpg'
+                            dst_filename = f"{md5}{ext}"
+                            dst_path = images_dir / dst_filename
+
+                            # 复制文件（去重：已存在则跳过）
+                            if not dst_path.exists():
+                                try:
+                                    shutil.copy2(src_path, dst_path)
+                                except Exception:
+                                    pass  # 静默失败
 
     def _build_avatar_map(self, members: list[ParsedMember]) -> dict[str, str]:
         """构建头像映射（uid -> avatar_url）
