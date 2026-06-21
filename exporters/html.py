@@ -34,11 +34,38 @@ class HTMLExporter(BaseExporter):
         # 构建成员映射
         member_map = {m.platform_id: m for m in members}
 
+        # 补充消息中出现的其他 UID（如被引用消息的发送者）
+        from db import DatabaseManager
+        db_path = self.config.get('db_path')
+        if db_path:
+            try:
+                from pathlib import Path
+                dbman = DatabaseManager(Path(db_path))
+                from parser.message import MessageParser
+                parser = MessageParser(dbman)
+
+                # 收集所有出现的 UID
+                all_uids = set(m.platform_id for m in members)
+                for msg in messages:
+                    all_uids.add(msg.sender_uid)
+
+                # 查询缺失的成员信息
+                for uid in all_uids:
+                    if uid not in member_map:
+                        # 尝试查询这个 UID 的信息
+                        try:
+                            member = parser.get_c2c_member(uid)
+                            member_map[uid] = member
+                        except:
+                            pass  # 查询失败，保持 UID
+            except:
+                pass  # 静默失败
+
         # 获取所有者 ID（判断"我"）
         owner_id = meta.get('ownerId', '')
 
         # 构建头像映射（从数据库查询）
-        avatar_map = self._build_avatar_map(members)
+        avatar_map = self._build_avatar_map(list(member_map.values()))
 
         # 按日期分组消息
         messages_by_date = self._group_messages_by_date(messages)
@@ -255,7 +282,7 @@ class HTMLExporter(BaseExporter):
                     quoted_content = quoted_content[:50] + '...'
 
                 quoted_html = f'''
-<div class="quote" onclick="scrollToMessage('{html.escape(msg.quoted_msg_id)}')">
+<div class="quote" onclick="scrollToMessage('{html.escape(quoted_msg.msg_id)}')">
     <div class="quote-sender">{html.escape(quoted_sender_name)}</div>
     <div class="quote-content">{html.escape(quoted_content)}</div>
 </div>
