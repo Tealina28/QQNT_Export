@@ -5,6 +5,7 @@ message Elements {repeated Element elements = 40800;}
 message Element {
   uint64 id = 45001;
   uint32 type = 45002;
+  uint32 subType = 45003; // 子元素类型，用于区分闪照/动画表情等
   // 1：文本段，2：图片段，3：文件消息，4:语音消息，5：视频，6：表情段，7：引用段，
   // 8：提示消息（中间灰色），9：红包，10：应用消息
   // 21：通话段
@@ -21,6 +22,7 @@ message Element {
   bytes md5HexStr = 45406; // 小写
   uint64 original = 45418; // 0 false, 1 true
   string originImageMd5 = 45424;
+  uint64 imageIsFlash = 45829; // 1 为闪照
 
   string imageUrlLow = 45802;
   string imageUrlHigh = 45803;
@@ -68,6 +70,7 @@ message Element {
   uint32 senderNum = 47403;
   uint32 quotedTimestamp = 47404;
   uint32 interlocutorNum = 47411;
+  string quotedSummary = 47413; // 被引用原消息的文本摘要（降级兜底）
 
   Element quotedElement = 47423;
 
@@ -75,6 +78,11 @@ message Element {
   // 提示消息
   string noticeInfo = 48214;
   string noticeInfo2 = 48271; // ?
+
+  // 撤回提示（grayTipElement, type 8 的子情况）
+  string recallerUid = 47703;  // 撤回者 UID
+  string recallerName = 47705; // 撤回者昵称（后备，不可靠）
+  string recallSuffix = 47713; // 撤回后缀文本，如 "你猜猜撤回了什么。"
 
 
   // 红包
@@ -99,6 +107,30 @@ message Element {
 
   string feedJumpInfo = 48183;
   string feedPublisherUid = 48188;
+
+
+  // 商城表情（marketFaceElement, type 11）
+  // 外显描述文本，如 "[贴贴]"
+  string marketFaceText = 80900;
+  uint64 marketFacePackageId = 80810; // 表情包 ID
+  string marketFaceKey = 80824;       // 表情字符 ID（Key）
+
+
+  // markdown / 机器人消息 / markdown 按钮（type 14、17、44）
+  string markdownText = 48701;
+
+
+  // XML 消息（type 16）
+  string xmlContent = 48602;
+
+
+  // 弹射/平底锅表情（faceBubbleElement, type 27）
+  // 摘要，如 "[平底锅]x10"
+  string bubbleFaceSummary = 52138;
+
+
+  // 位置共享（shareLocationElement, type 28）
+  string locationText = 52152;
 }
 
 message FeedMessage {string text = 48178;}
@@ -108,4 +140,17 @@ message RedPacket {
   string prompt = 48444;
   string redPacketType = 48445;
   string summary = 48448;
+}
+
+// 合并转发消息的子消息结构（解析 40900 字段）
+message ForwardedMessage {
+  uint64 msgId = 40001;           // 子消息 ID
+  uint32 timestamp = 40002;       // 发送时间（秒级时间戳，需 *1000 转毫秒）
+  uint32 msgType = 40011;         // 消息类型（2=文本等）
+  string senderUid = 40020;       // 发送者 UID
+  uint32 senderNum = 40033;       // 发送者 QQ 号
+  uint32 timestampAlt = 40050;    // 另一个时间戳字段（通常与 40002 相同或更精确）
+  bytes messageBody = 40800;      // 标准 Elements protobuf（可递归解析）
+  uint32 quotedSeq = 40850;       // 被引用消息序列号（若此子消息引用了其他消息）
+  // 嵌套转发：子消息本身也可能是转发消息，递归包含更多 ForwardedMessage
 }
