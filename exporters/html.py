@@ -1,7 +1,7 @@
 """
 HTML 格式导出器
 
-单文件 HTML 导出，Apple 极简风格，支持亮/暗主题。
+单文件 HTML 导出，面向长聊天记录浏览，支持搜索、筛选和亮/暗主题。
 """
 
 import html
@@ -198,16 +198,47 @@ class HTMLExporter(BaseExporter):
             message_map[message.msg_id] = message
             message_map.setdefault(str(message.seq), message)
 
+        message_count = len(all_messages)
+        if all_messages:
+            first_date = datetime.fromtimestamp(
+                all_messages[0].timestamp
+            ).strftime('%Y-%m-%d')
+            last_date = datetime.fromtimestamp(
+                all_messages[-1].timestamp
+            ).strftime('%Y-%m-%d')
+            date_range = (
+                first_date if first_date == last_date
+                else f'{first_date} 至 {last_date}'
+            )
+        else:
+            date_range = '无消息'
+
+        sender_uids = {message.sender_uid for message in all_messages}
+        sender_options = []
+        for uid in sorted(
+            sender_uids,
+            key=lambda item: (
+                member_map[item].get_display_name()
+                if item in member_map else item
+            ),
+        ):
+            member = member_map.get(uid)
+            name = member.get_display_name() if member else uid
+            sender_options.append(
+                f'<option value="{html.escape(uid, quote=True)}">'
+                f'{html.escape(name)}</option>'
+            )
+
         # 生成时间轴项
         timeline_items_html = []
         for date_str, msgs in messages_by_date:
             # 生成锚点 ID（使用日期字符串）
             date_id = date_str.replace(' ', '-').replace('/', '-')
             timeline_items_html.append(f'''
-<div class="timeline-item" onclick="scrollToDate('{date_id}')">
+<button class="timeline-item" data-date="{date_id}" onclick="scrollToDate('{date_id}')">
     <div class="date">{date_str}</div>
     <div class="count">{len(msgs)} 条消息</div>
-</div>
+</button>
             ''')
 
         # 渲染日期块
@@ -219,20 +250,24 @@ class HTMLExporter(BaseExporter):
                 msgs_html.append(self._render_message(msg, member_map, owner_id, avatar_map, message_map))
 
             date_blocks_html.append(f'''
-<details class="date-block" open id="date-{date_id}">
-    <summary>{date_str} ({len(msgs)} 条)</summary>
+<section class="date-block" id="date-{date_id}" data-date="{date_id}">
+    <div class="date-divider"><span>{date_str}</span><small>{len(msgs)} 条</small></div>
     <div class="messages">
         {''.join(msgs_html)}
     </div>
-</details>
+</section>
             ''')
 
         return HTML_TEMPLATE.format(
             chat_name=chat_name,
             chat_type=chat_type,
             export_time=export_time,
+            message_count=message_count,
+            member_count=len(sender_uids),
+            date_range=html.escape(date_range),
             date_blocks=''.join(date_blocks_html),
-            timeline_items=''.join(timeline_items_html)
+            timeline_items=''.join(timeline_items_html),
+            sender_options=''.join(sender_options),
         )
 
     def _render_message(
@@ -253,15 +288,36 @@ class HTMLExporter(BaseExporter):
         # 检查是否为系统消息
         if msg.elements and msg.elements[0].type == ElementType.NOTICE:
             notice_text = self._format_notice_text(msg.elements[0].content, member_map)
-            return f'<div class="system-message" id="msg-{html.escape(msg.msg_id)}"><span class="system-text">{html.escape(notice_text)}</span></div>'
+            search_text = html.escape(notice_text.lower(), quote=True)
+            full_time = datetime.fromtimestamp(msg.timestamp).strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
+            return (
+                f'<div class="message-entry system-message" '
+                f'id="msg-{html.escape(msg.msg_id)}" '
+                f'data-search="{search_text}" data-sender="">'
+                f'<span class="system-text">{html.escape(notice_text)}</span>'
+                f'<time title="{full_time}">'
+                f'{datetime.fromtimestamp(msg.timestamp).strftime("%H:%M")}'
+                f'</time></div>'
+            )
 
         # 格式化时间
         time_str = datetime.fromtimestamp(msg.timestamp).strftime('%H:%M')
+        full_time = datetime.fromtimestamp(msg.timestamp).strftime(
+            '%Y-%m-%d %H:%M:%S'
+        )
 
         # 头像（优先使用图片 URL，回退到首字母）
         avatar_url = avatar_map.get(msg.sender_uid)
         if avatar_url:
-            avatar_html = f'<img src="{html.escape(avatar_url)}" alt="{html.escape(sender_name)}" class="avatar-img">'
+            avatar_html = (
+                f'<img src="{html.escape(avatar_url, quote=True)}" '
+                f'alt="{html.escape(sender_name, quote=True)}" '
+                'class="avatar-img" '
+                'onerror="this.style.display=\'none\'; '
+                'this.parentElement.textContent=this.alt.slice(0,1)||\'?\'">'
+            )
         else:
             avatar_char = sender_name[0] if sender_name else '?'
             avatar_html = html.escape(avatar_char)
@@ -310,13 +366,17 @@ class HTMLExporter(BaseExporter):
 </div>
             '''
 
+        search_text = ' '.join((
+            sender_name,
+            self._extract_text_content(msg.elements),
+        )).lower()
         return f'''
-<div class="message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}">
+<div class="message-entry message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
     <div class="avatar">{avatar_html}</div>
     <div class="message-wrapper">
         <div class="meta">
             <span class="sender">{html.escape(sender_name)}</span>
-            <span class="time">{time_str}</span>
+            <time class="time" title="{full_time}">{time_str}</time>
         </div>
         <div class="bubble">
             {quoted_html}
@@ -353,20 +413,38 @@ class HTMLExporter(BaseExporter):
 
             elif elem.type in (ElementType.FILE, ElementType.ONLINE_FILE):
                 filename = html.escape(elem.content.get('filename', ''))
-                parts.append(f'<div class="text">[文件: {filename}]</div>')
+                parts.append(
+                    '<div class="attachment-card">'
+                    '<span class="attachment-icon">文</span>'
+                    '<span><strong>文件</strong>'
+                    f'<small>{filename or "未知文件"}</small></span></div>'
+                )
 
             elif elem.type == ElementType.ONLINE_FOLDER:
                 filename = html.escape(elem.content.get('filename', ''))
-                parts.append(f'<div class="text">[文件夹: {filename}]</div>')
+                parts.append(
+                    '<div class="attachment-card">'
+                    '<span class="attachment-icon">目</span>'
+                    '<span><strong>文件夹</strong>'
+                    f'<small>{filename or "未命名文件夹"}</small></span></div>'
+                )
 
             elif elem.type == ElementType.VOICE:
                 text = elem.content.get('text')
-                label = f'[语音: {text}]' if text else '[语音]'
-                parts.append(f'<div class="text">{html.escape(label)}</div>')
+                label = text or '未转写语音'
+                parts.append(
+                    '<div class="media-chip"><span>语音</span>'
+                    f'{html.escape(label)}</div>'
+                )
 
             elif elem.type == ElementType.VIDEO:
                 filename = html.escape(elem.content.get('filename', ''))
-                parts.append(f'<div class="text">[视频: {filename}]</div>')
+                parts.append(
+                    '<div class="attachment-card">'
+                    '<span class="attachment-icon">影</span>'
+                    '<span><strong>视频</strong>'
+                    f'<small>{filename or "未知视频"}</small></span></div>'
+                )
 
             elif elem.type in (ElementType.APPLICATION, ElementType.MULTI_MSG):
                 # 检查是否为转发消息
@@ -375,7 +453,7 @@ class HTMLExporter(BaseExporter):
                     fwd_html = self._render_forward_messages(fwd_msgs, member_map)
                     parts.append(fwd_html)
                 else:
-                    parts.append('<div class="text">[应用消息]</div>')
+                    parts.append('<div class="placeholder-card">应用消息</div>')
 
             elif elem.type in (ElementType.EMOJI, ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
                 text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
@@ -384,14 +462,20 @@ class HTMLExporter(BaseExporter):
             elif elem.type == ElementType.RED_PACKET:
                 prompt = html.escape(elem.content.get('prompt', ''))
                 label = '转账' if elem.content.get('wallet_type') == 'transfer' else '红包'
-                parts.append(f'<div class="text">[{label}: {prompt}]</div>')
+                parts.append(
+                    f'<div class="wallet-card"><strong>{label}</strong>'
+                    f'<span>{prompt or "QQ 钱包消息"}</span></div>'
+                )
 
             elif elem.type == ElementType.CALL:
                 text = elem.content.get('text') or '[通话]'
                 duration_ms = elem.content.get('duration_ms') or 0
                 if duration_ms:
                     text = f'{text} ({duration_ms // 1000}秒)'
-                parts.append(f'<div class="text">{html.escape(text)}</div>')
+                parts.append(
+                    f'<div class="media-chip"><span>通话</span>'
+                    f'{html.escape(text)}</div>'
+                )
 
             elif elem.type in (ElementType.MARKDOWN, ElementType.BOT):
                 flash = elem.content.get('flash_transfer')
@@ -416,7 +500,12 @@ class HTMLExporter(BaseExporter):
 
             elif elem.type == ElementType.LOCATION:
                 text = elem.content.get('text') or '位置共享'
-                parts.append(f'<div class="text">[位置: {html.escape(text)}]</div>')
+                parts.append(
+                    '<div class="attachment-card">'
+                    '<span class="attachment-icon">位</span>'
+                    '<span><strong>位置</strong>'
+                    f'<small>{html.escape(text)}</small></span></div>'
+                )
 
             elif elem.type == ElementType.FEED:
                 title = elem.content.get('title')
@@ -432,13 +521,17 @@ class HTMLExporter(BaseExporter):
                     feed_parts.append(html.escape(subtitle))
 
                 if feed_parts:
-                    parts.append(f'<div class="text">📰 {" | ".join(feed_parts)}</div>')
+                    parts.append(
+                        f'<div class="feed-card">{"<br>".join(feed_parts)}</div>'
+                    )
                 else:
-                    parts.append('<div class="text">[动态]</div>')
+                    parts.append('<div class="placeholder-card">动态</div>')
 
             else:
                 # 其他类型暂时用占位符
-                parts.append(f'<div class="text">[{elem.type.name}]</div>')
+                parts.append(
+                    f'<div class="placeholder-card">{elem.type.name}</div>'
+                )
 
         return ''.join(parts) if parts else '<div class="text">[空消息]</div>'
 
@@ -481,7 +574,14 @@ class HTMLExporter(BaseExporter):
                     if img_file.stem == md5:
                         # 相对路径（相对于 HTML 文件）
                         rel_path = f"resources/images/{img_file.name}"
-                        return f'<img src="{rel_path}" class="message-image" onclick="showImage(\'{rel_path}\')" alt="图片">'
+                        path_attr = html.escape(rel_path, quote=True)
+                        return (
+                            f'<button class="image-button" type="button" '
+                            f'data-src="{path_attr}" '
+                            f'onclick="showImage(this.dataset.src)">'
+                            f'<img src="{path_attr}" class="message-image" '
+                            f'alt="图片" loading="lazy"></button>'
+                        )
         else:
             # 模式 2：直接指向原始 pic_path 目录（使用相对路径）
             pic_path = self.config.get('pic_path')
@@ -500,7 +600,14 @@ class HTMLExporter(BaseExporter):
                         img_file = src_path.absolute()
                         rel_path = os.path.relpath(img_file, html_file.parent)
                         rel_path_str = rel_path.replace('\\', '/')
-                        return f'<img src="{rel_path_str}" class="message-image" onclick="showImage(\'{rel_path_str}\')" alt="图片">'
+                        path_attr = html.escape(rel_path_str, quote=True)
+                        return (
+                            f'<button class="image-button" type="button" '
+                            f'data-src="{path_attr}" '
+                            f'onclick="showImage(this.dataset.src)">'
+                            f'<img src="{path_attr}" class="message-image" '
+                            f'alt="图片" loading="lazy"></button>'
+                        )
                     except Exception:
                         # 失败时显示占位符
                         return '<div class="text">[图片]</div>'
@@ -562,18 +669,43 @@ class HTMLExporter(BaseExporter):
             elif elem.type == ElementType.IMAGE:
                 parts.append('[图片]')
             elif elem.type in (ElementType.FILE, ElementType.ONLINE_FILE):
-                parts.append('[文件]')
+                filename = elem.content.get('filename') or ''
+                parts.append(f'[文件] {filename}')
             elif elem.type == ElementType.ONLINE_FOLDER:
-                parts.append('[文件夹]')
+                filename = elem.content.get('filename') or ''
+                parts.append(f'[文件夹] {filename}')
             elif elem.type == ElementType.VOICE:
-                parts.append('[语音]')
+                parts.append(elem.content.get('text') or '[语音]')
             elif elem.type == ElementType.VIDEO:
-                parts.append('[视频]')
+                filename = elem.content.get('filename') or ''
+                parts.append(f'[视频] {filename}')
             elif elem.type in (ElementType.EMOJI, ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
                 text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
                 parts.append(text)
             elif elem.type in (ElementType.MARKDOWN, ElementType.BOT):
                 parts.append(elem.content.get('summary') or elem.content.get('text') or '[消息]')
+            elif elem.type in (ElementType.APPLICATION, ElementType.MULTI_MSG):
+                forward_messages = elem.content.get('forward_messages', [])
+                if forward_messages:
+                    previews = [
+                        self._extract_text_content(message.elements)
+                        for message in forward_messages[:10]
+                    ]
+                    parts.append('[转发消息] ' + ' '.join(previews))
+                else:
+                    parts.append('[应用消息]')
+            elif elem.type == ElementType.RED_PACKET:
+                parts.append(elem.content.get('prompt') or '[红包/转账]')
+            elif elem.type == ElementType.CALL:
+                parts.append(elem.content.get('text') or '[通话]')
+            elif elem.type == ElementType.LOCATION:
+                parts.append(elem.content.get('text') or '[位置]')
+            elif elem.type == ElementType.FEED:
+                parts.extend(filter(None, (
+                    elem.content.get('title'),
+                    elem.content.get('content'),
+                    elem.content.get('subtitle'),
+                )))
             elif elem.type == ElementType.MARKDOWN_BUTTON:
                 labels = [
                     button.get('label', '')
@@ -1223,230 +1355,896 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 height: 32px;
             }}
         }}
+
+        /* 现代聊天记录布局：借鉴 QCE 的工具栏与 WebArk 的对话密度 */
+        :root {{
+            --page-bg: #eef0f2;
+            --panel-bg: rgba(255, 255, 255, 0.92);
+            --chat-bg: #f3f4f5;
+            --control-bg: #f0f1f3;
+            --control-hover: #e5e7ea;
+            --accent: #1296db;
+            --accent-soft: rgba(18, 150, 219, 0.12);
+            --bubble-self: #12a0e8;
+            --bubble-other: #ffffff;
+            --text-primary: #17191c;
+            --text-secondary: #7b8088;
+            --text-self: #ffffff;
+            --text-other: #17191c;
+            --border: rgba(20, 25, 32, 0.09);
+            --shadow: rgba(24, 31, 40, 0.08);
+        }}
+
+        [data-theme="dark"] {{
+            --page-bg: #111315;
+            --panel-bg: rgba(28, 30, 33, 0.94);
+            --chat-bg: #181a1d;
+            --control-bg: #292c30;
+            --control-hover: #34383d;
+            --accent: #42b7f5;
+            --accent-soft: rgba(66, 183, 245, 0.15);
+            --bubble-self: #168fcf;
+            --bubble-other: #292c30;
+            --text-primary: #f2f3f5;
+            --text-secondary: #a0a5ad;
+            --text-self: #ffffff;
+            --text-other: #f2f3f5;
+            --border: rgba(255, 255, 255, 0.09);
+            --shadow: rgba(0, 0, 0, 0.24);
+            --system-bg: #292c30;
+            --system-text: #a0a5ad;
+        }}
+
+        html {{
+            scroll-behavior: smooth;
+            scroll-padding-top: 84px;
+        }}
+
+        body {{
+            min-width: 320px;
+            background: var(--page-bg);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+                BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+        }}
+
+        button, input, select {{
+            font: inherit;
+        }}
+
+        header.topbar {{
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: grid;
+            grid-template-columns: minmax(180px, 1fr) minmax(420px, 680px);
+            align-items: center;
+            gap: 24px;
+            min-height: 68px;
+            padding: 10px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--panel-bg);
+            backdrop-filter: blur(18px) saturate(150%);
+            text-align: left;
+        }}
+
+        .brand {{
+            display: flex;
+            min-width: 0;
+            align-items: center;
+            gap: 12px;
+        }}
+
+        .brand-copy {{ min-width: 0; }}
+        .brand h1 {{
+            overflow: hidden;
+            margin: 0;
+            font-size: 17px;
+            font-weight: 650;
+            line-height: 1.25;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+        .brand p {{
+            margin: 2px 0 0;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }}
+
+        .toolbar {{
+            display: flex;
+            min-width: 0;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+        }}
+
+        .search-box {{
+            position: relative;
+            display: flex;
+            min-width: 210px;
+            flex: 1;
+            align-items: center;
+        }}
+
+        .search-input {{
+            width: 100%;
+            height: 38px;
+            padding: 0 76px 0 34px;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            background: var(--control-bg);
+            color: var(--text-primary);
+            font-size: 14px;
+        }}
+        .search-input:focus {{
+            border-color: var(--accent);
+            background: var(--bg-primary);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }}
+        .search-symbol {{
+            position: absolute;
+            left: 11px;
+            color: var(--text-secondary);
+            font-size: 15px;
+            pointer-events: none;
+        }}
+        .search-status {{
+            position: absolute;
+            right: 9px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+        }}
+
+        .sender-filter {{
+            width: 132px;
+            height: 38px;
+            padding: 0 30px 0 11px;
+            border: 0;
+            border-radius: 10px;
+            outline: none;
+            background: var(--control-bg);
+            color: var(--text-primary);
+            cursor: pointer;
+        }}
+
+        .icon-button {{
+            display: inline-grid;
+            width: 38px;
+            height: 38px;
+            flex: 0 0 38px;
+            place-items: center;
+            border: 0;
+            border-radius: 10px;
+            background: var(--control-bg);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background .15s, transform .15s;
+        }}
+        .icon-button:hover {{ background: var(--control-hover); }}
+        .icon-button:active {{ transform: scale(.94); }}
+        #timelineToggle {{ display: none; }}
+
+        .page-shell {{
+            display: grid;
+            grid-template-columns: 220px minmax(0, 820px);
+            justify-content: center;
+            gap: 34px;
+            padding: 28px 24px 100px;
+        }}
+
+        .timeline-sidebar {{
+            position: sticky;
+            top: 96px;
+            left: auto;
+            z-index: 10;
+            width: auto;
+            height: calc(100vh - 120px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--panel-bg);
+            box-shadow: 0 10px 30px var(--shadow);
+            overflow: hidden;
+        }}
+        .timeline-header {{ padding: 16px 16px 10px; border: 0; }}
+        .timeline-header h2 {{ font-size: 14px; font-weight: 650; }}
+        .timeline-close {{ display: none; }}
+        .timeline-content {{ padding: 4px 8px 12px; }}
+        .timeline-item {{
+            display: flex;
+            width: 100%;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin: 2px 0;
+            padding: 9px 10px;
+            border: 0;
+            border-radius: 9px;
+            background: transparent;
+            text-align: left;
+        }}
+        .timeline-item .date {{ margin: 0; font-size: 13px; font-weight: 550; }}
+        .timeline-item .count {{ font-size: 11px; white-space: nowrap; }}
+        .timeline-item.active {{
+            background: var(--accent-soft);
+            color: var(--accent);
+        }}
+        .timeline-item.hidden {{ display: none; }}
+
+        main.chat-main {{
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding: 0;
+        }}
+
+        .hero {{
+            margin-bottom: 18px;
+            padding: 28px 30px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: var(--panel-bg);
+            box-shadow: 0 12px 34px var(--shadow);
+        }}
+        .hero-kicker {{
+            margin-bottom: 7px;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .08em;
+        }}
+        .hero h2 {{
+            margin: 0;
+            font-size: clamp(28px, 4vw, 44px);
+            font-weight: 720;
+            letter-spacing: -.035em;
+            line-height: 1.12;
+        }}
+        .stats {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 22px;
+            margin-top: 22px;
+        }}
+        .stat {{ display: grid; gap: 2px; }}
+        .stat strong {{ font-size: 15px; font-weight: 650; }}
+        .stat span {{ color: var(--text-secondary); font-size: 11px; }}
+
+        .chat-surface {{
+            padding: 20px 22px 48px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: var(--chat-bg);
+            box-shadow: 0 12px 34px var(--shadow);
+        }}
+        .date-block {{ margin: 0 0 32px; scroll-margin-top: 88px; }}
+        .date-block.hidden {{ display: none; }}
+        .date-divider {{
+            position: sticky;
+            top: 78px;
+            z-index: 5;
+            display: flex;
+            width: max-content;
+            align-items: center;
+            gap: 7px;
+            margin: 2px auto 22px;
+            padding: 5px 10px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--panel-bg);
+            color: var(--text-secondary);
+            box-shadow: 0 4px 12px var(--shadow);
+            backdrop-filter: blur(12px);
+            font-size: 11px;
+        }}
+        .date-divider small {{ opacity: .75; }}
+
+        .messages {{ padding: 0; }}
+        .message-entry.hidden {{ display: none; }}
+        .message-entry {{
+            content-visibility: auto;
+            contain-intrinsic-size: auto 82px;
+        }}
+        .message-group {{ gap: 10px; margin-bottom: 18px; scroll-margin-top: 120px; }}
+        .avatar {{
+            width: 38px;
+            height: 38px;
+            border: 1px solid var(--border);
+            background: var(--panel-bg);
+            font-size: 13px;
+            box-shadow: 0 2px 7px var(--shadow);
+        }}
+        .message-wrapper {{ max-width: min(72%, 620px); }}
+        .meta {{ margin: 0 3px 5px; gap: 7px; }}
+        .sender {{ font-size: 12px; font-weight: 550; }}
+        .time {{ font-size: 11px; }}
+        .bubble {{
+            position: relative;
+            padding: 10px 13px;
+            border: 1px solid var(--border);
+            border-radius: 5px 14px 14px 14px;
+            background: var(--bubble-other);
+            box-shadow: 0 3px 10px var(--shadow);
+            font-size: 15px;
+            line-height: 1.55;
+        }}
+        .is-self .bubble {{
+            border-color: transparent;
+            border-radius: 14px 5px 14px 14px;
+        }}
+        .bubble::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -6px;
+            width: 10px;
+            height: 12px;
+            background: var(--bubble-other);
+            clip-path: polygon(100% 0, 100% 100%, 0 0);
+        }}
+        .is-self .bubble::before {{
+            right: -6px;
+            left: auto;
+            background: var(--bubble-self);
+            clip-path: polygon(0 0, 100% 0, 0 100%);
+        }}
+
+        .text + .text {{ margin-top: 5px; }}
+        .image-button {{
+            display: block;
+            max-width: 100%;
+            margin: 2px 0;
+            padding: 0;
+            overflow: hidden;
+            border: 0;
+            border-radius: 10px;
+            background: transparent;
+            cursor: zoom-in;
+        }}
+        .message-image {{
+            width: auto;
+            max-width: min(100%, 420px);
+            max-height: 440px;
+            margin: 0;
+            border-radius: 10px;
+            object-fit: contain;
+        }}
+        .attachment-card, .media-chip, .wallet-card, .feed-card,
+        .placeholder-card {{ margin: 3px 0; }}
+        .attachment-card {{
+            display: grid;
+            min-width: 230px;
+            grid-template-columns: 38px minmax(0, 1fr);
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: rgba(127, 127, 127, .08);
+        }}
+        .attachment-icon {{
+            display: grid;
+            width: 38px;
+            height: 38px;
+            place-items: center;
+            border-radius: 9px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        .attachment-card > span:last-child {{ display: grid; min-width: 0; }}
+        .attachment-card strong {{ font-size: 13px; }}
+        .attachment-card small {{
+            overflow: hidden;
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+        .media-chip {{ display: flex; align-items: center; gap: 8px; }}
+        .media-chip span {{
+            padding: 2px 6px;
+            border-radius: 5px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 650;
+        }}
+        .wallet-card {{
+            display: grid;
+            min-width: 210px;
+            gap: 4px;
+            padding: 12px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #ff9f43, #ff6b35);
+            color: #fff;
+        }}
+        .wallet-card span {{ font-size: 12px; opacity: .88; }}
+        .feed-card, .placeholder-card {{
+            padding: 10px 11px;
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            background: rgba(127, 127, 127, .07);
+        }}
+        .placeholder-card {{ color: var(--text-secondary); font-size: 13px; }}
+        .forward-container {{
+            min-width: 260px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: rgba(127, 127, 127, .07);
+        }}
+        .forward-item {{ color: var(--text-secondary); font-size: 12px; }}
+        .quote {{ border-left-color: var(--accent); border-radius: 6px; }}
+        .quote-sender {{ color: var(--accent); }}
+
+        .system-message {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            margin: 18px 0;
+            scroll-margin-top: 120px;
+        }}
+        .system-message time {{ color: var(--text-secondary); font-size: 10px; }}
+        .system-text {{ border: 1px solid var(--border); font-size: 11px; }}
+
+        .search-match .bubble,
+        .search-match .system-text {{
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }}
+        .message-highlight .bubble,
+        .message-highlight .system-text {{
+            animation: none;
+            box-shadow: 0 0 0 5px var(--accent-soft), 0 3px 10px var(--shadow);
+        }}
+        .empty-results {{
+            display: none;
+            padding: 70px 20px;
+            color: var(--text-secondary);
+            text-align: center;
+        }}
+        .empty-results.visible {{ display: block; }}
+        .filter-summary {{
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 0 0 18px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--panel-bg);
+            color: var(--text-secondary);
+            font-size: 12px;
+        }}
+        .filter-summary.visible {{ display: flex; }}
+
+        #backToTop {{
+            position: fixed;
+            right: 22px;
+            bottom: 22px;
+            z-index: 30;
+            opacity: 0;
+            pointer-events: none;
+            box-shadow: 0 8px 24px var(--shadow);
+            transition: opacity .2s, transform .2s;
+            transform: translateY(8px);
+        }}
+        #backToTop.visible {{ opacity: 1; pointer-events: auto; transform: none; }}
+
+        #imageModal {{
+            background: rgba(8, 10, 12, .94);
+            cursor: zoom-out;
+            backdrop-filter: blur(10px);
+        }}
+        #modalImage {{ max-width: 94%; max-height: 92%; object-fit: contain; }}
+        .modal-close {{
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            color: #fff;
+            background: rgba(255, 255, 255, .14);
+        }}
+
+        @media (max-width: 860px) {{
+            header.topbar {{
+                grid-template-columns: 1fr;
+                gap: 8px;
+                padding: 9px 12px;
+            }}
+            .brand p {{ display: none; }}
+            #timelineToggle {{ display: inline-grid; }}
+            .toolbar {{ justify-content: stretch; }}
+            .sender-filter {{ width: 110px; }}
+            .page-shell {{ display: block; padding: 16px 12px 80px; }}
+            .timeline-sidebar {{
+                position: fixed;
+                top: 0;
+                bottom: 0;
+                left: -290px;
+                z-index: 200;
+                width: 280px;
+                height: 100vh;
+                border-radius: 0 16px 16px 0;
+                transition: left .2s ease;
+            }}
+            .timeline-sidebar.active {{ left: 0; }}
+            .timeline-close {{ display: grid; }}
+            .hero {{ padding: 22px; }}
+            .chat-surface {{ padding: 18px 12px 40px; }}
+            .date-divider {{ top: 118px; }}
+        }}
+
+        @media (max-width: 560px) {{
+            header.topbar {{ min-height: 0; }}
+            .toolbar {{ display: grid; grid-template-columns: 1fr auto auto; }}
+            .search-box {{ min-width: 0; grid-column: 1 / -1; }}
+            .sender-filter {{ width: 100%; }}
+            .hero {{ margin-bottom: 10px; border-radius: 14px; }}
+            .hero h2 {{ font-size: 28px; }}
+            .stats {{ gap: 14px 20px; }}
+            .chat-surface {{ border-radius: 14px; }}
+            .message-group {{ gap: 7px; }}
+            .avatar {{ width: 34px; height: 34px; }}
+            .message-wrapper {{ max-width: 82%; }}
+            .bubble {{ font-size: 14px; }}
+            .attachment-card, .forward-container {{ min-width: 0; }}
+            .date-divider {{ top: 156px; }}
+        }}
     </style>
 </head>
 <body>
-    <header>
-        <h1>{chat_name}</h1>
-        <div class="meta">{chat_type} | 导出时间: {export_time}</div>
-        <div class="header-actions">
-            <input type="text" id="searchInput" placeholder="搜索消息..." class="search-input">
-            <button id="themeToggle">🌙</button>
-            <button id="timelineToggle" title="时间轴">📅</button>
+    <header class="topbar">
+        <div class="brand">
+            <button id="timelineToggle" class="icon-button" title="打开日期导航" aria-label="打开日期导航">☰</button>
+            <div class="brand-copy">
+                <h1>{chat_name}</h1>
+                <p>{chat_type} · {message_count} 条消息</p>
+            </div>
+        </div>
+        <div class="toolbar">
+            <label class="search-box">
+                <span class="search-symbol">⌕</span>
+                <input type="search" id="searchInput" placeholder="搜索消息或发送者" class="search-input" autocomplete="off">
+                <span id="searchStatus" class="search-status">{message_count} 条</span>
+            </label>
+            <select id="senderFilter" class="sender-filter" title="按发送者筛选">
+                <option value="">全部发送者</option>
+                {sender_options}
+            </select>
+            <button id="previousResult" class="icon-button" title="上一条结果" aria-label="上一条结果">↑</button>
+            <button id="nextResult" class="icon-button" title="下一条结果" aria-label="下一条结果">↓</button>
+            <button id="themeToggle" class="icon-button" title="切换主题" aria-label="切换主题">◐</button>
         </div>
     </header>
 
-    <div class="timeline-sidebar" id="timelineSidebar">
-        <div class="timeline-header">
-            <h3>时间轴</h3>
-            <button class="timeline-close" onclick="toggleTimeline()">×</button>
-        </div>
-        <div class="timeline-content">
-            {timeline_items}
-        </div>
+    <div class="page-shell">
+        <aside class="timeline-sidebar" id="timelineSidebar">
+            <div class="timeline-header">
+                <h2>日期导航</h2>
+                <button class="timeline-close icon-button" onclick="toggleTimeline(false)" aria-label="关闭日期导航">×</button>
+            </div>
+            <nav class="timeline-content" aria-label="聊天日期">
+                {timeline_items}
+            </nav>
+        </aside>
+
+        <main class="chat-main">
+            <section class="hero">
+                <div class="hero-kicker">QQNT EXPORT</div>
+                <h2>{chat_name}</h2>
+                <div class="stats">
+                    <div class="stat"><strong>{message_count}</strong><span>消息</span></div>
+                    <div class="stat"><strong>{member_count}</strong><span>发送者</span></div>
+                    <div class="stat"><strong>{date_range}</strong><span>时间范围</span></div>
+                    <div class="stat"><strong>{export_time}</strong><span>导出时间</span></div>
+                </div>
+            </section>
+            <section class="chat-surface" aria-label="聊天消息">
+                <div id="filterSummary" class="filter-summary">
+                    <span id="filterSummaryText"></span>
+                </div>
+                <div id="emptyResults" class="empty-results">没有找到匹配的消息</div>
+                {date_blocks}
+            </section>
+        </main>
     </div>
 
-    <main>
-        {date_blocks}
-    </main>
+    <button id="backToTop" class="icon-button" title="返回顶部" aria-label="返回顶部">↑</button>
 
-    <div id="imageModal" onclick="closeModal()">
-        <img id="modalImage" src="" alt="">
+    <div id="imageModal" onclick="closeModal()" role="dialog" aria-label="图片预览">
+        <button class="modal-close icon-button" onclick="closeModal()" aria-label="关闭图片预览">×</button>
+        <img id="modalImage" src="" alt="图片预览" onclick="event.stopPropagation()">
     </div>
 
     <script>
-        // 主题切换
-        const themeToggle = document.getElementById('themeToggle');
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {{
-            document.documentElement.setAttribute('data-theme', savedTheme);
-            themeToggle.textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+        const root = document.documentElement;
+        const searchInput = document.getElementById('searchInput');
+        const searchStatus = document.getElementById('searchStatus');
+        const senderFilter = document.getElementById('senderFilter');
+        const timelineSidebar = document.getElementById('timelineSidebar');
+        const chatSurface = document.querySelector('.chat-surface');
+        const filterSummary = document.getElementById('filterSummary');
+        const filterSummaryText = document.getElementById('filterSummaryText');
+        const emptyResults = document.getElementById('emptyResults');
+        const messages = Array.from(document.querySelectorAll('.message-entry'));
+        const dateBlocks = Array.from(document.querySelectorAll('.date-block'));
+        const dateBlockMap = new Map(dateBlocks.map(block => [block.dataset.date, block]));
+        const messageRecords = messages.map(element => ({{
+            element,
+            search: element.dataset.search,
+            sender: element.dataset.sender,
+            date: element.closest('.date-block').dataset.date
+        }}));
+        const messageRecordMap = new Map(messageRecords.map(record => [record.element.id, record]));
+        const originalContent = document.createDocumentFragment();
+        let matches = messageRecords.slice();
+        let renderedMatches = [];
+        let filterActive = false;
+        let currentMatch = -1;
+        let searchGeneration = 0;
+        let searchInProgress = false;
+        let searchTimer;
+
+        function setTheme(theme) {{
+            root.setAttribute('data-theme', theme);
+            localStorage.setItem('qqnt-export-theme', theme);
+            document.getElementById('themeToggle').textContent = theme === 'dark' ? '◑' : '◐';
         }}
 
-        themeToggle.onclick = () => {{
-            const current = document.documentElement.getAttribute('data-theme');
-            const next = current === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', next);
-            localStorage.setItem('theme', next);
-            themeToggle.textContent = next === 'dark' ? '☀️' : '🌙';
+        const savedTheme = localStorage.getItem('qqnt-export-theme');
+        setTheme(savedTheme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+        document.getElementById('themeToggle').onclick = () => {{
+            setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
         }};
 
-        // 时间轴切换
-        const timelineToggle = document.getElementById('timelineToggle');
-        const timelineSidebar = document.getElementById('timelineSidebar');
-
-        function toggleTimeline() {{
-            timelineSidebar.classList.toggle('active');
+        function toggleTimeline(force) {{
+            const active = typeof force === 'boolean'
+                ? force : !timelineSidebar.classList.contains('active');
+            timelineSidebar.classList.toggle('active', active);
         }}
+        document.getElementById('timelineToggle').onclick = () => toggleTimeline();
 
-        timelineToggle.onclick = toggleTimeline;
-
-        // 图片预览
-        function showImage(src) {{
-            const modal = document.getElementById('imageModal');
-            const img = document.getElementById('modalImage');
-            img.src = src;
-            modal.style.display = 'flex';
-        }}
-
-        function closeModal() {{
-            document.getElementById('imageModal').style.display = 'none';
-        }}
-
-        // 搜索功能
-        const searchInput = document.getElementById('searchInput');
-        let searchTimeout;
-
-        searchInput.addEventListener('input', (e) => {{
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {{
-                const query = e.target.value.toLowerCase().trim();
-                const messages = document.querySelectorAll('.message-group');
-                const dateBlocks = document.querySelectorAll('.date-block');
-
-                if (!query) {{
-                    // 清空搜索，显示所有消息
-                    messages.forEach(msg => msg.classList.remove('hidden'));
-                    dateBlocks.forEach(block => block.open = true);
-                    // 移除所有高亮
-                    document.querySelectorAll('.highlight').forEach(el => {{
-                        const text = el.textContent;
-                        el.outerHTML = text;
-                    }});
-                    return;
-                }}
-
-                let hasVisibleMessages = false;
-
-                dateBlocks.forEach(block => {{
-                    const blockMessages = block.querySelectorAll('.message-group');
-                    let blockHasVisible = false;
-
-                    blockMessages.forEach(msg => {{
-                        // 移除旧高亮
-                        msg.querySelectorAll('.highlight').forEach(el => {{
-                            const text = el.textContent;
-                            el.outerHTML = text;
-                        }});
-
-                        const text = msg.textContent.toLowerCase();
-                        if (text.includes(query)) {{
-                            msg.classList.remove('hidden');
-                            blockHasVisible = true;
-                            hasVisibleMessages = true;
-
-                            // 高亮匹配文本
-                            const bubble = msg.querySelector('.bubble');
-                            if (bubble) {{
-                                highlightText(bubble, query);
-                            }}
-                        }} else {{
-                            msg.classList.add('hidden');
-                        }}
-                    }});
-
-                    // 展开有匹配的日期块
-                    block.open = blockHasVisible;
-                }});
-            }}, 300); // 防抖 300ms
-        }});
-
-        function highlightText(element, query) {{
-            const walker = document.createTreeWalker(
-                element,
-                NodeFilter.SHOW_TEXT,
-                null,
-                false
-            );
-
-            const nodesToReplace = [];
-            let node;
-
-            while (node = walker.nextNode()) {{
-                const text = node.textContent.toLowerCase();
-                if (text.includes(query)) {{
-                    nodesToReplace.push(node);
-                }}
-            }}
-
-            nodesToReplace.forEach(node => {{
-                const text = node.textContent;
-                const lowerText = text.toLowerCase();
-                const index = lowerText.indexOf(query);
-
-                if (index !== -1) {{
-                    const before = text.substring(0, index);
-                    const match = text.substring(index, index + query.length);
-                    const after = text.substring(index + query.length);
-
-                    const fragment = document.createDocumentFragment();
-                    if (before) fragment.appendChild(document.createTextNode(before));
-
-                    const mark = document.createElement('span');
-                    mark.className = 'highlight';
-                    mark.textContent = match;
-                    fragment.appendChild(mark);
-
-                    if (after) fragment.appendChild(document.createTextNode(after));
-
-                    node.parentNode.replaceChild(fragment, node);
-                }}
+        function updateTimelineDates(visibleDates) {{
+            document.querySelectorAll('.timeline-item').forEach(item => {{
+                item.classList.toggle(
+                    'hidden', Boolean(visibleDates) && !visibleDates.has(item.dataset.date)
+                );
             }});
         }}
 
-        // 跳转到引用的消息
-        function scrollToMessage(msgId) {{
-            const targetMsg = document.getElementById('msg-' + msgId);
-            if (!targetMsg) {{
-                return; // 消息不在当前导出范围内
-            }}
-
-            // 展开目标消息所在的日期块
-            let parent = targetMsg.parentElement;
-            while (parent) {{
-                if (parent.tagName === 'DETAILS') {{
-                    parent.open = true;
-                    break;
-                }}
-                parent = parent.parentElement;
-            }}
-
-            // 滚动到目标消息
-            targetMsg.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-
-            // 添加高亮动画
-            targetMsg.classList.add('message-highlight');
-            setTimeout(() => {{
-                targetMsg.classList.remove('message-highlight');
-            }}, 2000);
+        function removeFilteredBlocks() {{
+            document.querySelectorAll('.filtered-date-block').forEach(block => block.remove());
         }}
 
-        // 滚动到指定日期
-        function scrollToDate(dateId) {{
-            const targetDate = document.getElementById('date-' + dateId);
-            if (!targetDate) {{
+        function enterFilteredMode() {{
+            if (filterActive) return;
+            dateObserver.disconnect();
+            dateBlocks.forEach(block => originalContent.appendChild(block));
+            filterActive = true;
+        }}
+
+        function leaveFilteredMode() {{
+            if (!filterActive) return;
+            dateObserver.disconnect();
+            removeFilteredBlocks();
+            chatSurface.appendChild(originalContent);
+            filterActive = false;
+            currentMatch = -1;
+            renderedMatches = [];
+            filterSummary.classList.remove('visible');
+            emptyResults.classList.remove('visible');
+            updateTimelineDates(null);
+            dateBlocks.forEach(block => dateObserver.observe(block));
+        }}
+
+        function renderResults(generation) {{
+            enterFilteredMode();
+            dateObserver.disconnect();
+            removeFilteredBlocks();
+            emptyResults.classList.toggle('visible', matches.length === 0);
+            filterSummary.classList.toggle('visible', matches.length > 0);
+            filterSummaryText.textContent = matches.length
+                ? '找到 ' + matches.length + ' 条消息' : '';
+            updateTimelineDates(new Set(matches.map(record => record.date)));
+
+            if (!matches.length) {{
+                renderedMatches = [];
+                searchInProgress = false;
+                searchStatus.textContent = '0 条';
                 return;
             }}
 
-            // 展开日期块
-            targetDate.open = true;
+            searchStatus.textContent = '渲染中…';
+            const fragment = document.createDocumentFragment();
+            const containers = new Map();
+            let cursor = 0;
+            const renderChunkSize = 500;
 
-            // 滚动到日期块
-            targetDate.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+            function renderChunk() {{
+                if (generation !== searchGeneration) return;
+                const end = Math.min(cursor + renderChunkSize, matches.length);
+                for (; cursor < end; cursor++) {{
+                    const record = matches[cursor];
+                    let container = containers.get(record.date);
+                    if (!container) {{
+                        const source = dateBlockMap.get(record.date);
+                        const section = source.cloneNode(false);
+                        section.classList.add('filtered-date-block');
+                        section.appendChild(
+                            source.querySelector('.date-divider').cloneNode(true)
+                        );
+                        container = document.createElement('div');
+                        container.className = 'messages';
+                        section.appendChild(container);
+                        fragment.appendChild(section);
+                        containers.set(record.date, container);
+                    }}
+                    container.appendChild(record.element.cloneNode(true));
+                }}
 
-            // 关闭时间轴
-            toggleTimeline();
+                if (cursor < matches.length) {{
+                    searchStatus.textContent = '渲染中 '
+                        + Math.round(cursor / matches.length * 100) + '%';
+                    setTimeout(renderChunk, 0);
+                    return;
+                }}
+
+                chatSurface.appendChild(fragment);
+                renderedMatches = Array.from(
+                    chatSurface.querySelectorAll('.filtered-date-block .message-entry')
+                );
+                document.querySelectorAll('.filtered-date-block').forEach(
+                    block => dateObserver.observe(block)
+                );
+                searchInProgress = false;
+                searchStatus.textContent = matches.length + ' 条';
+            }}
+
+            renderChunk();
         }}
 
-        // 键盘快捷键
-        document.addEventListener('keydown', (e) => {{
-            if (e.key === 'Escape') {{
-                closeModal();
-                searchInput.blur();
+        function applyFilters() {{
+            const query = searchInput.value.toLowerCase().trim();
+            const sender = senderFilter.value;
+            const generation = ++searchGeneration;
+            currentMatch = -1;
+
+            if (!query && !sender) {{
+                searchInProgress = false;
+                leaveFilteredMode();
+                matches = messageRecords.slice();
+                searchStatus.textContent = messages.length + ' 条';
+                return;
             }}
-            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {{
-                e.preventDefault();
+
+            searchInProgress = true;
+            searchStatus.textContent = '搜索中…';
+            const found = [];
+            let cursor = 0;
+            const chunkSize = 8000;
+
+            function scanChunk() {{
+                if (generation !== searchGeneration) return;
+                const end = Math.min(cursor + chunkSize, messageRecords.length);
+                for (; cursor < end; cursor++) {{
+                    const record = messageRecords[cursor];
+                    if (
+                        (!query || record.search.includes(query))
+                        && (!sender || record.sender === sender)
+                    ) found.push(record);
+                }}
+
+                if (cursor < messageRecords.length) {{
+                    searchStatus.textContent = '搜索中 '
+                        + Math.round(cursor / messageRecords.length * 100) + '%';
+                    setTimeout(scanChunk, 0);
+                    return;
+                }}
+
+                matches = found;
+                renderResults(generation);
+            }}
+
+            scanChunk();
+        }}
+
+        function moveToResult(step) {{
+            if (searchInProgress || !filterActive || !matches.length) return;
+            if (currentMatch < 0) {{
+                currentMatch = step > 0 ? 0 : matches.length - 1;
+            }} else {{
+                currentMatch = (currentMatch + step + matches.length) % matches.length;
+            }}
+            renderedMatches.forEach(element => element.classList.remove('search-match'));
+            const target = renderedMatches[currentMatch];
+            target.classList.add('search-match');
+            target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+            searchStatus.textContent = (currentMatch + 1) + ' / ' + matches.length;
+        }}
+
+        searchInput.addEventListener('input', () => {{
+            searchGeneration++;
+            searchInProgress = false;
+            clearTimeout(searchTimer);
+            searchStatus.textContent = '…';
+            searchTimer = setTimeout(applyFilters, 500);
+        }});
+        senderFilter.addEventListener('change', applyFilters);
+        document.getElementById('previousResult').onclick = () => moveToResult(-1);
+        document.getElementById('nextResult').onclick = () => moveToResult(1);
+
+        function showImage(src) {{
+            const modal = document.getElementById('imageModal');
+            document.getElementById('modalImage').src = src;
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }}
+        function closeModal() {{
+            const modal = document.getElementById('imageModal');
+            modal.style.display = 'none';
+            document.getElementById('modalImage').src = '';
+            document.body.style.overflow = '';
+        }}
+
+        function scrollToMessage(msgId) {{
+            const elementId = 'msg-' + msgId;
+            let target = document.getElementById(elementId);
+            if (!target && filterActive && messageRecordMap.has(elementId)) {{
+                searchInput.value = '';
+                senderFilter.value = '';
+                applyFilters();
+                requestAnimationFrame(() => scrollToMessage(msgId));
+                return;
+            }}
+            if (!target) return;
+            target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+            target.classList.add('message-highlight');
+            setTimeout(() => target.classList.remove('message-highlight'), 1800);
+        }}
+
+        function scrollToDate(dateId) {{
+            const target = document.getElementById('date-' + dateId);
+            if (!target) return;
+            target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+            if (matchMedia('(max-width: 860px)').matches) toggleTimeline(false);
+        }}
+
+        const dateObserver = new IntersectionObserver(entries => {{
+            const visible = entries
+                .filter(entry => entry.isIntersecting)
+                .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+            if (!visible) return;
+            document.querySelectorAll('.timeline-item').forEach(item => {{
+                item.classList.toggle('active', item.dataset.date === visible.target.dataset.date);
+            }});
+        }}, {{ rootMargin: '-80px 0px -65% 0px', threshold: [0, .1, .5] }});
+        dateBlocks.forEach(block => dateObserver.observe(block));
+
+        const backToTop = document.getElementById('backToTop');
+        addEventListener('scroll', () => {{
+            backToTop.classList.toggle('visible', scrollY > 700);
+        }}, {{ passive: true }});
+        backToTop.onclick = () => scrollTo({{ top: 0, behavior: 'smooth' }});
+
+        document.addEventListener('keydown', event => {{
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {{
+                event.preventDefault();
                 searchInput.focus();
+                searchInput.select();
+            }} else if (event.key === '/' && document.activeElement !== searchInput) {{
+                event.preventDefault();
+                searchInput.focus();
+            }} else if (event.key === 'Enter' && document.activeElement === searchInput) {{
+                event.preventDefault();
+                moveToResult(event.shiftKey ? -1 : 1);
+            }} else if (event.key === 'Escape') {{
+                closeModal();
+                toggleTimeline(false);
+                searchInput.blur();
             }}
         }});
     </script>

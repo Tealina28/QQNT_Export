@@ -7,6 +7,7 @@ from unittest.mock import patch
 import element_pb2
 
 from exporters.chatlab_json import ChatLabJSONExporter
+from exporters.html import HTMLExporter
 from main import EXPORTER_MAP, export_query
 from parser.dataline import (
     DATALINE_PAD_UID,
@@ -22,7 +23,7 @@ from parser.elements import (
     compute_image_cache_paths,
 )
 from parser.message import MessageParser
-from parser.models import ElementType, ParsedElement, ParsedMessage
+from parser.models import ElementType, ParsedElement, ParsedMember, ParsedMessage
 
 
 def make_c2c_message(elements, **overrides):
@@ -86,6 +87,52 @@ class StreamingExportTests(unittest.TestCase):
         self.assertEqual(query.batch_size, 2)
         self.assertFalse(StreamingExporter.received_list)
         self.assertEqual(StreamingExporter.exported, [10, 20, 30])
+
+
+class HTMLExportTests(unittest.TestCase):
+    def test_modern_layout_contains_navigation_filters_and_message_cards(self):
+        members = [
+            ParsedMember('self', 10001, '我'),
+            ParsedMember('alice', 10002, 'Alice'),
+        ]
+        messages = [
+            ParsedMessage(
+                msg_id='1', seq=1, sender_uid='alice', sender_num=10002,
+                timestamp=1700000000,
+                elements=[ParsedElement(ElementType.TEXT, {'text': 'hello'})],
+            ),
+            ParsedMessage(
+                msg_id='2', seq=2, sender_uid='self', sender_num=10001,
+                timestamp=1700000060,
+                elements=[ParsedElement(
+                    ElementType.FILE, {'filename': 'report.pdf'}
+                )],
+                quoted_msg_id='1',
+            ),
+        ]
+
+        with TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / 'chat.html'
+            HTMLExporter(output, {'copy_resources': False}).export(
+                {'name': '测试会话', 'type': 'private', 'ownerId': 'self'},
+                members,
+                messages,
+            )
+            content = output.read_text(encoding='utf-8')
+
+        self.assertIn('class="topbar"', content)
+        self.assertIn('id="senderFilter"', content)
+        self.assertIn('class="timeline-sidebar"', content)
+        self.assertIn('class="attachment-card"', content)
+        self.assertIn('report.pdf', content)
+        self.assertIn('data-search="alice hello"', content)
+        self.assertIn('2 条消息', content)
+        self.assertIn('const originalContent = document.createDocumentFragment()', content)
+        self.assertIn('function scanChunk()', content)
+        self.assertIn('function renderChunk()', content)
+        self.assertIn('setTimeout(applyFilters, 500)', content)
+        self.assertNotIn('id="previousPage"', content)
+        self.assertNotIn("message.classList.toggle('hidden'", content)
 
 
 class ImageCachePathTests(unittest.TestCase):
