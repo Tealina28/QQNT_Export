@@ -9,7 +9,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
 import element_pb2
 from .man import DatabaseManager
 
-__all__ = ["C2cMessage", "GroupMessage", "UidMapping", "ProfileInfo", "GroupList", "GroupMember"]
+__all__ = [
+    "C2cMessage", "DatalineMessage", "GroupMessage", "UidMapping",
+    "ProfileInfo", "GroupList", "GroupMember",
+]
 
 profile_map = {}
 group_map = {}
@@ -87,6 +90,19 @@ class C2cMessage(Base, Message):
     interlocutor_num: Mapped[int] = mapped_column("40030")  # qq num
 
     mapping = relationship('UidMapping', back_populates='c2c_messages')
+
+
+@DatabaseManager.register_model("nt_msg")
+class DatalineMessage(Base, Message):
+    """跨设备同步消息，表结构与私聊消息相同。"""
+    __tablename__ = "dataline_msg_table"
+
+    interlocutor_uid: Mapped[str] = mapped_column("40021", String(24))
+    UNK_10: Mapped[int] = mapped_column("40027")
+    UNK_15: Mapped[str] = mapped_column("40090", Text)
+    UNK_23: Mapped[int] = mapped_column("40100")
+    UNK_25: Mapped[int] = mapped_column("40060")
+    interlocutor_num: Mapped[int] = mapped_column("40030")
 
 @DatabaseManager.register_model("nt_msg")
 class GroupMessage(Base, Message):

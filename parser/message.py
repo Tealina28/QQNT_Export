@@ -10,7 +10,19 @@ import logging
 import element_pb2
 
 from db import DatabaseManager
-from db.models import C2cMessage, GroupMessage, ProfileInfo, GroupMember
+from db.models import (
+    C2cMessage,
+    DatalineMessage,
+    GroupMessage,
+    ProfileInfo,
+    GroupMember,
+)
+from .dataline import (
+    DATALINE_PAD_UID,
+    DATALINE_PC_UID,
+    DATALINE_PHONE_UID,
+    dataline_device_name,
+)
 from .models import ParsedMessage, ParsedMember, ParsedElement, ParsedReaction
 from .elements import ElementParser, _parse_forward_cache, _quote_reference
 
@@ -57,6 +69,10 @@ class MessageParser:
             quoted_msg_seq=quoted_msg_seq,
             reactions=self._parse_reactions(msg),
         )
+
+    def parse_dataline_message(self, msg: DatalineMessage) -> ParsedMessage:
+        """按私聊结构解析数据线消息。"""
+        return self.parse_c2c_message(msg)
 
     def parse_group_message(self, msg: GroupMessage) -> ParsedMessage:
         """解析群聊消息
@@ -207,6 +223,34 @@ class MessageParser:
             remark=remark,
         )
         return self._self_member
+
+    def get_dataline_members(
+        self,
+        messages: list[ParsedMessage],
+        owner_id: str = DATALINE_PC_UID,
+    ) -> list[ParsedMember]:
+        """构建数据线设备成员，并确保配置的 ownerId 在成员列表中。"""
+        mapping = self.dbman.self_uid_mapping() if self.dbman else None
+        qq_num = mapping.qq_num if mapping else 0
+        if not qq_num:
+            qq_num = next((msg.sender_num for msg in messages if msg.sender_num), 0)
+
+        uids = {msg.sender_uid for msg in messages if msg.sender_uid}
+        uids.add(owner_id)
+        order = {
+            DATALINE_PC_UID: 1,
+            DATALINE_PHONE_UID: 2,
+            DATALINE_PAD_UID: 3,
+        }
+        order[owner_id] = 0
+        return [
+            ParsedMember(
+                platform_id=uid,
+                qq_num=qq_num,
+                nickname=dataline_device_name(uid),
+            )
+            for uid in sorted(uids, key=lambda uid: (order.get(uid, 99), uid))
+        ]
 
     def get_group_member(self, group_num: int, uid: str) -> Optional[ParsedMember]:
         """获取群成员信息

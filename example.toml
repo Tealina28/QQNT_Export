@@ -6,6 +6,11 @@ output_path = "" # 导出的路径，留空默认为数据库上级目录
 c2c_filters = [] # 需要输出的私聊消息的QQ号列表，留空导出全部
 group_filters = [] # 需要输出的群聊消息的群号列表，留空导出全部
 
+# 需要导出的会话类型：c2c（私聊）、group（群聊）、dataline（跨设备同步）
+conversation_types = ["c2c", "group", "dataline"]
+# 数据线中代表本机的设备：pc、phone 或 pad
+dataline_owner = "pc"
+
 # 导出格式：chatlab_json（ChatLab JSON）、chatlab_jsonl（ChatLab JSONL）、html（HTML 单文件）
 output_format = ["chatlab_json", "html"]
 
@@ -19,4 +24,3 @@ copy_resources = true
 # video_path = ""         # 视频缓存目录（待提供后激活视频落地）
 # file_path = ""          # 文件缓存目录（待提供后激活文件落地）
 # silk_transcode = false  # 是否启用 silk→mp3 转码（需 graiax-silkcoder 库）
-

@@ -6,6 +6,13 @@ from types import SimpleNamespace
 import element_pb2
 
 from exporters.chatlab_json import ChatLabJSONExporter
+from parser.dataline import (
+    DATALINE_PAD_UID,
+    DATALINE_PC_UID,
+    DATALINE_PHONE_UID,
+    dataline_conversation_name,
+    resolve_dataline_owner_id,
+)
 from parser.elements import (
     ElementParser,
     _parse_forward_cache,
@@ -73,6 +80,60 @@ class ImageCachePathTests(unittest.TestCase):
                 compute_image_cache_path('34' * 16, 1, root),
                 thumbnail,
             )
+
+
+class DatalineTests(unittest.TestCase):
+    def test_conversation_name_uses_peer_device(self):
+        self.assertEqual(
+            dataline_conversation_name([DATALINE_PC_UID, DATALINE_PHONE_UID]),
+            '我的手机',
+        )
+
+        self.assertEqual(
+            dataline_conversation_name(
+                [DATALINE_PC_UID, DATALINE_PHONE_UID],
+                DATALINE_PHONE_UID,
+            ),
+            '我的电脑',
+        )
+
+    def test_owner_id_is_resolved_from_device_name(self):
+        self.assertEqual(resolve_dataline_owner_id('pad'), DATALINE_PAD_UID)
+        self.assertEqual(resolve_dataline_owner_id('phone'), DATALINE_PHONE_UID)
+        self.assertEqual(resolve_dataline_owner_id(None), DATALINE_PC_UID)
+        with self.assertRaises(ValueError):
+            resolve_dataline_owner_id('unknown')
+
+    def test_device_members_use_pc_as_owner_identity(self):
+        dbman = SimpleNamespace(
+            self_uid_mapping=lambda: SimpleNamespace(qq_num=123456)
+        )
+        parser = MessageParser(dbman)
+        messages = [
+            ParsedMessage(
+                msg_id='1', seq=1, sender_uid=DATALINE_PHONE_UID,
+                sender_num=123456, timestamp=1700000000, elements=[],
+            ),
+            ParsedMessage(
+                msg_id='2', seq=2, sender_uid=DATALINE_PC_UID,
+                sender_num=123456, timestamp=1700000001, elements=[],
+            ),
+        ]
+
+        members = parser.get_dataline_members(messages)
+
+        self.assertEqual(
+            [member.platform_id for member in members],
+            [DATALINE_PC_UID, DATALINE_PHONE_UID],
+        )
+        self.assertEqual(
+            [member.nickname for member in members],
+            ['我的电脑', '我的手机'],
+        )
+        self.assertTrue(all(member.qq_num == 123456 for member in members))
+
+        phone_owned = parser.get_dataline_members(messages, DATALINE_PHONE_UID)
+        self.assertEqual(phone_owned[0].platform_id, DATALINE_PHONE_UID)
 
 
 class ForwardCacheTests(unittest.TestCase):

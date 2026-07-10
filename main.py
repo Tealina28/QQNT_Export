@@ -13,6 +13,10 @@ from tqdm import tqdm
 
 from db import DatabaseManager
 from parser import MessageParser
+from parser.dataline import (
+    dataline_conversation_name,
+    resolve_dataline_owner_id,
+)
 from exporters import EXPORTER_MAP
 
 
@@ -43,19 +47,32 @@ def sanitize_filename(filename) -> str:
     return re.sub(illegal_chars, '_', str(filename))
 
 
-def create_output_dirs(base_path: Path) -> tuple[Path, Path]:
+def create_output_dirs(
+    base_path: Path,
+    conversation_types: set[str] | None = None,
+) -> tuple[Path, Path, Path]:
     """创建输出目录结构
 
     Returns:
-        (c2c_path, group_path) 元组
+        (c2c_path, group_path, dataline_path) 元组
     """
     c2c_path = base_path / "c2c"
     group_path = base_path / "group"
+    dataline_path = base_path / "dataline"
 
-    c2c_path.mkdir(parents=True, exist_ok=True)
-    group_path.mkdir(parents=True, exist_ok=True)
+    enabled = (
+        {'c2c', 'group', 'dataline'}
+        if conversation_types is None else conversation_types
+    )
+    for conversation_type, path in (
+        ('c2c', c2c_path),
+        ('group', group_path),
+        ('dataline', dataline_path),
+    ):
+        if conversation_type in enabled:
+            path.mkdir(parents=True, exist_ok=True)
 
-    return c2c_path, group_path
+    return c2c_path, group_path, dataline_path
 
 
 def export_c2c_conversation(
@@ -205,6 +222,45 @@ def export_group_conversation(
         logging.info(f"  导出完成: {output_path.name}")
 
 
+def export_dataline_conversation(
+    parser: MessageParser,
+    partition_uid: str,
+    query,
+    output_formats: list[str],
+    output_dir: Path,
+    config: dict,
+    owner_id: str,
+):
+    """导出一个数据线（我的手机/电脑/平板）会话。"""
+    rows = query.all()
+    messages = [parser.parse_dataline_message(msg) for msg in rows]
+    conversation_name = dataline_conversation_name(
+        (message.sender_uid for message in messages),
+        owner_id,
+        partition_uid,
+    )
+    logging.info(f"开始导出数据线: {conversation_name}")
+
+    members = parser.get_dataline_members(messages, owner_id)
+    meta = {
+        'name': conversation_name,
+        'platform': 'qq',
+        'type': 'private',
+        'ownerId': owner_id,
+    }
+
+    for format_name in output_formats:
+        exporter_cls = EXPORTER_MAP.get(format_name)
+        if not exporter_cls:
+            logging.warning(f"未知的导出格式: {format_name}")
+            continue
+
+        extension = exporter_cls(output_dir, config).get_file_extension()
+        output_path = output_dir / f"{sanitize_filename(conversation_name)}{extension}"
+        exporter_cls(output_path, config).export(meta, members, messages)
+        logging.info(f"  导出完成: {output_path.name}")
+
+
 def main():
     """主程序"""
     if len(argv) < 2:
@@ -225,8 +281,20 @@ def main():
     else:
         output_path = Path(config["output_path"])
 
+    configured_types = config.get(
+        'conversation_types', ['c2c', 'group', 'dataline']
+    )
+    if isinstance(configured_types, str):
+        configured_types = [configured_types]
+    conversation_types = {
+        str(conversation_type).lower()
+        for conversation_type in configured_types
+    }
+
     # 创建输出目录
-    c2c_path, group_path = create_output_dirs(output_path)
+    c2c_path, group_path, dataline_path = create_output_dirs(
+        output_path, conversation_types
+    )
 
     # 过滤器
     c2c_filters = config.get("c2c_filters", [])
@@ -243,8 +311,21 @@ def main():
     parser = MessageParser(dbman)
 
     # 获取查询
-    c2c_queries = dbman.c2c_messages(c2c_filters)
-    group_queries = dbman.group_messages(group_filters)
+    c2c_queries = (
+        dbman.c2c_messages(c2c_filters)
+        if 'c2c' in conversation_types else {}
+    )
+    group_queries = (
+        dbman.group_messages(group_filters)
+        if 'group' in conversation_types else {}
+    )
+    dataline_owner_id = resolve_dataline_owner_id(
+        config.get('dataline_owner')
+    )
+    dataline_queries = (
+        dbman.dataline_messages()
+        if 'dataline' in conversation_types else {}
+    )
 
     # 导出私聊
     if c2c_queries:
@@ -269,6 +350,21 @@ def main():
                 )
             except Exception as e:
                 logging.error(f"导出群聊 {group_num} 失败: {e}", exc_info=True)
+
+    # 导出跨设备同步消息
+    if dataline_queries:
+        logging.info(f"找到 {len(dataline_queries)} 个数据线会话")
+        for uid, query in tqdm(
+            dataline_queries.items(), desc="导出数据线", unit="个"
+        ):
+            try:
+                export_dataline_conversation(
+                    parser, uid, query,
+                    output_formats, dataline_path, config,
+                    dataline_owner_id,
+                )
+            except Exception as e:
+                logging.error(f"导出数据线 {uid} 失败: {e}", exc_info=True)
 
     logging.info("导出完成！")
 

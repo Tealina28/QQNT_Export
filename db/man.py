@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.query import Query
 
@@ -55,6 +55,27 @@ class DatabaseManager:
 
         queries = {uid: query.filter_by(interlocutor_uid = uid).order_by(model.time) for uid in uids}
 
+        return queries
+
+    def dataline_messages(self):
+        """按设备会话读取数据线消息；旧版数据库无此表时返回空。"""
+        model = self._models["nt_msg"]["dataline_msg_table"]
+        engine = self._engines.get("nt_msg")
+        if not engine or not inspect(engine).has_table(model.__tablename__):
+            return {}
+
+        query = self.session.query(model)
+        partitions = self.session.query(
+            model.UNK_10, model.interlocutor_uid
+        ).distinct().all()
+        queries = {}
+        for sort_no, uid in partitions:
+            key = uid or f'dataline-{sort_no}'
+            if sort_no is not None:
+                partition_query = query.filter_by(UNK_10=sort_no)
+            else:
+                partition_query = query.filter_by(interlocutor_uid=uid)
+            queries[key] = partition_query.order_by(model.time)
         return queries
 
     def self_uid_mapping(self):

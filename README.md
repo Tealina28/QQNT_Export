@@ -13,6 +13,7 @@
 - **可扩展解析器**：注册机制添加新的消息元素类型
 - **导出进度条**：基于 tqdm 实时显示导出进度
 - **流式处理**：JSONL 格式支持超大规模数据导出
+- **跨设备消息**：导出 `dataline_msg_table` 中“我的手机/电脑/平板”同步记录
 
 ## 📦 导出格式
 
@@ -60,10 +61,17 @@ output_path = ""          # 导出路径（默认为 databases/../output）
 
 c2c_filters = []          # 私聊过滤（QQ号列表，空=全部）
 group_filters = []        # 群聊过滤（群号列表，空=全部）
+conversation_types = ["c2c", "group", "dataline"]
+dataline_owner = "pc"    # 数据线中的本机设备：pc、phone 或 pad
 
 # 导出格式：chatlab_json 和/或 chatlab_jsonl
 output_format = ["chatlab_json", "chatlab_jsonl"]
 ```
+
+导出结果分别写入 `output/c2c/`、`output/group/` 和
+`output/dataline/`。只会查询和创建 `conversation_types` 中启用的会话类型。
+数据线会话无需过滤配置；`dataline_owner` 决定
+ChatLab 的 `ownerId` 以及 HTML 中消息的收发方向。
 
 ## 📁 项目结构
 
@@ -74,6 +82,7 @@ QQNT_Export/
 │   └── man.py            # DatabaseManager
 ├── parser/               # 解析层（新）
 │   ├── models.py         # 数据模型
+│   ├── dataline.py       # 数据线设备身份
 │   ├── elements.py       # 元素解析器（注册机制）
 │   └── message.py        # 消息解析器
 ├── exporters/            # 导出层（新）
