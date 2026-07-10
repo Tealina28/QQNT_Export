@@ -6,7 +6,12 @@ from types import SimpleNamespace
 import element_pb2
 
 from exporters.chatlab_json import ChatLabJSONExporter
-from parser.elements import ElementParser, _parse_forward_cache
+from parser.elements import (
+    ElementParser,
+    _parse_forward_cache,
+    compute_image_cache_path,
+    compute_image_cache_paths,
+)
 from parser.message import MessageParser
 from parser.models import ElementType, ParsedElement, ParsedMessage
 
@@ -25,6 +30,49 @@ def make_c2c_message(elements, **overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+class ImageCachePathTests(unittest.TestCase):
+    def test_keeps_existing_preferred_directory_order(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+
+            non_original = compute_image_cache_paths('ab' * 16, 0, root)
+            original = compute_image_cache_paths('cd' * 16, 1, root)
+
+            self.assertEqual(
+                [path.parent.parent.name for path in non_original],
+                ['chatraw', 'chatimg', 'chatthumb'],
+            )
+            self.assertEqual(
+                [path.parent.parent.name for path in original],
+                ['chatimg', 'chatraw', 'chatthumb'],
+            )
+
+    def test_falls_back_to_existing_alternate_cache(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            candidates = compute_image_cache_paths('12' * 16, 0, root)
+            alternate = candidates[1]
+            alternate.parent.mkdir(parents=True)
+            alternate.write_bytes(b'image')
+
+            self.assertEqual(
+                compute_image_cache_path('12' * 16, 0, root),
+                alternate,
+            )
+
+    def test_falls_back_to_thumbnail_cache(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            thumbnail = compute_image_cache_paths('34' * 16, 1, root)[2]
+            thumbnail.parent.mkdir(parents=True)
+            thumbnail.write_bytes(b'thumbnail')
+
+            self.assertEqual(
+                compute_image_cache_path('34' * 16, 1, root),
+                thumbnail,
+            )
 
 
 class ForwardCacheTests(unittest.TestCase):

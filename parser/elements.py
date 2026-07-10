@@ -664,38 +664,69 @@ def _quote_reference(
     return None, None
 
 
+@lru_cache(maxsize=1)
+def _qq_crc64_table() -> tuple[int, ...]:
+    """构建 QQ 图片缓存路径使用的固定 CRC64 查表。"""
+    table = [0] * 256
+    for i in range(256):
+        value = i
+        for _ in range(8):
+            value = (
+                value >> 1 ^ -7661587058870466123
+                if value & 1 else value >> 1
+            )
+        table[i] = value
+    return tuple(table)
+
+
+def _qq_crc64(raw_str: str) -> int:
+    """计算 QQ 图片缓存路径使用的 CRC64。"""
+    table = _qq_crc64_table()
+    value = -1
+    for char in raw_str:
+        value = table[(ord(char) ^ value) & 255] ^ value >> 8
+    return value
+
+
 @lru_cache(maxsize=4096)
-def compute_image_cache_path(md5: str, original: int, pic_path: Optional[Path]) -> Optional[Path]:
-    """计算图片缓存路径（仿照 QQ 的 CRC64 算法）
+def compute_image_cache_paths(
+    md5: str,
+    original: int,
+    pic_path: Optional[Path],
+) -> tuple[Path, ...]:
+    """计算图片在 chatpic 各缓存目录中的候选路径。
 
     Args:
         md5: 图片 MD5（大写十六进制）
-        original: 0=非原图(chatraw), 1=原图(chatimg)
+        original: 图片元素的 original 字段，用于保持现有首选目录
         pic_path: chatpic 根目录
 
     Returns:
-        完整的缓存路径，如果 pic_path 为 None 则返回 None
+        按首选目录、另一图片目录、缩略图目录排列的候选路径
     """
     if not pic_path:
-        return None
+        return ()
 
-    def crc64(raw_str: str) -> int:
-        """CRC64 校验"""
-        _crc64_table = [0] * 256
-        for i in range(256):
-            bf = i
-            for _ in range(8):
-                bf = bf >> 1 ^ -7661587058870466123 if bf & 1 else bf >> 1
-            _crc64_table[i] = bf
+    normalized_md5 = md5.upper()
+    preferred = "chatimg" if original else "chatraw"
+    folders = (preferred, "chatraw" if original else "chatimg", "chatthumb")
+    paths = []
+    for folder in folders:
+        crc64_value = _qq_crc64(f"{folder}:{normalized_md5}")
+        file_name = f"Cache_{crc64_value:x}"
+        paths.append(pic_path / folder / file_name[-3:] / file_name)
+    return tuple(paths)
 
-        value = -1
-        for char in raw_str:
-            value = _crc64_table[(ord(char) ^ value) & 255] ^ value >> 8
-        return value
 
-    folder = "chatimg" if original else "chatraw"
-    raw_str = f"{folder}:{md5}"
-    crc64_value = crc64(raw_str)
-    file_name = f"Cache_{crc64_value:x}"
+def compute_image_cache_path(
+    md5: str,
+    original: int,
+    pic_path: Optional[Path],
+) -> Optional[Path]:
+    """返回首个实际存在的图片缓存，均不存在时保留原首选路径。"""
+    candidates = compute_image_cache_paths(md5, original, pic_path)
+    for path in candidates:
+        if path.is_file():
+            return path
 
-    return pic_path / folder / file_name[-3:] / file_name
+    return candidates[0] if candidates else None
