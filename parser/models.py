@@ -23,11 +23,14 @@ class ElementType(IntEnum):
     APPLICATION = 10
     MARKET_FACE = 11    # 商城表情
     MARKDOWN = 14       # markdown 消息
-    XML = 16            # XML 消息
+    MULTI_MSG = 16      # 合并转发（XML 卡片 + 40900 缓存）
+    MARKDOWN_BUTTON = 17  # QQ Bot Markdown 按钮组
     CALL = 21
+    ONLINE_FILE = 23    # 在线文件
     FEED = 26
     BUBBLE_FACE = 27    # 弹射/平底锅表情
     LOCATION = 28       # 位置共享
+    ONLINE_FOLDER = 30  # 在线文件夹
     BOT = 44            # 机器人对话
     OTHER = 99
 
@@ -48,6 +51,15 @@ class ParsedElement:
 
 
 @dataclass
+class ParsedReaction:
+    """群消息的贴表情反应（数据库列 40062）。"""
+    emoji_id: str
+    count: int
+    is_self: bool = False
+    set_flag: int = 0
+
+
+@dataclass
 class ParsedMessage:
     """解析后的消息
 
@@ -58,7 +70,9 @@ class ParsedMessage:
         sender_num: 发送者 QQ 号
         timestamp: 时间戳（秒级）
         elements: 消息元素列表
-        quoted_msg_id: 引用的消息 seq（可选）
+        quoted_msg_id: 引用的原消息雪花 ID（可选）
+        quoted_msg_seq: 引用的原消息序列号（可选，仅用于本地回退查找）
+        reactions: 群消息贴表情反应
         group_num: 群号（群聊消息）
         sender_nickname: 发送者昵称（群聊）
         sender_card: 发送者群名片（群聊）
@@ -70,6 +84,8 @@ class ParsedMessage:
     timestamp: int
     elements: list[ParsedElement]
     quoted_msg_id: Optional[str] = None
+    quoted_msg_seq: Optional[int] = None
+    reactions: list[ParsedReaction] = field(default_factory=list)
     # 群聊特有字段
     group_num: Optional[int] = None
     sender_nickname: Optional[str] = None

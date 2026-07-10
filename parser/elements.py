@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Callable, Optional
 import logging
 
+from google.protobuf.message import DecodeError
+
 from .models import ParsedElement, ElementType, ParsedMessage
 import element_pb2
 
@@ -39,28 +41,47 @@ class ElementParser:
         return decorator
 
     @classmethod
-    def parse(cls, element, forward_cache_bytes: Optional[bytes] = None) -> Optional[ParsedElement]:
+    def parse(
+        cls,
+        element,
+        forward_messages: Optional[list[ParsedMessage]] = None,
+    ) -> ParsedElement:
         """解析单个 element
 
         Args:
             element: protobuf Element 对象
-            forward_cache_bytes: 合并转发的 40900 缓存字段（仅用于 type=10）
+            forward_messages: 已解析的 40900 子消息（用于合并转发元素）
 
         Returns:
-            ParsedElement 对象，未知类型返回 OTHER
+            ParsedElement 对象。未知或解析失败的类型返回 OTHER，
+            并保留原始 protobuf 数据。
         """
         parser = cls._parsers.get(element.type)
-        if parser:
-            # type=10 需要额外传入 forward_cache_bytes
-            if element.type == 10:
-                return parser(element, forward_cache_bytes)
-            return parser(element)
+        if not parser:
+            return _other_element(element)
 
-        # 未知类型返回 OTHER
-        return ParsedElement(
-            type=ElementType.OTHER,
-            content={'raw_type': element.type}
-        )
+        try:
+            if element.type in (10, 16):
+                return parser(element, forward_messages)
+            return parser(element)
+        except Exception as exc:
+            logger.exception(
+                "failed to parse element: type=%s id=%s",
+                element.type,
+                getattr(element, 'id', 0),
+            )
+            return _other_element(element, str(exc))
+
+
+def _other_element(element, error: Optional[str] = None) -> ParsedElement:
+    """保留未知或失败元素的原始数据，便于后续反向分析。"""
+    content = {
+        'raw_type': getattr(element, 'type', 0),
+        'raw_hex': element.SerializeToString().hex(),
+    }
+    if error:
+        content['parse_error'] = error
+    return ParsedElement(type=ElementType.OTHER, content=content)
 
 
 # ============================================================================
@@ -73,7 +94,10 @@ def parse_text(element) -> ParsedElement:
     return ParsedElement(
         type=ElementType.TEXT,
         content={
-            'text': element.text
+            'text': element.text,
+            'is_at': bool(element.bubbleId or element.atMentionMask),
+            'bubble_id': element.bubbleId or None,
+            'at_mention_mask': element.atMentionMask or None,
         }
     )
 
@@ -81,12 +105,23 @@ def parse_text(element) -> ParsedElement:
 @ElementParser.register(2)
 def parse_image(element) -> ParsedElement:
     """解析图片消息"""
+    summary = '\n'.join(element.mediaSummary)
     content = {
         'filename': element.fileName,
         'size': element.fileSize,
-        'text': element.imageText,  # 图片描述文字
-        'file_path': element.imageFilePath,
+        'text': summary,
+        'file_path': element.imageFilePath or element.filePath,
+        'width': element.mediaWidth,
+        'height': element.mediaHeight,
+        'image_type': element.imageType,
         'url_origin': element.imageUrlOrigin,
+        'url_preview': element.imageUrlHigh,
+        'url_thumbnail': element.imageUrlLow,
+        'file_token': element.fileToken,
+        'upload_time': element.uploadTime,
+        'upload_timestamp': element.uploadTimestamp,
+        'file_ttl': element.fileTTL,
+        'cdn_host': element.cdnHost,
         'sub_type': element.subType,       # 子类型：7=特殊动画表情，1/2=普通动画/超级秀
         'is_flash': element.imageIsFlash,  # 1=闪照
     }
@@ -110,6 +145,11 @@ def parse_file(element) -> ParsedElement:
         content={
             'filename': element.fileName,
             'size': element.fileSize,
+            'file_path': element.filePath,
+            'file_token': element.fileToken,
+            'transfer_flag': element.transferFlag,
+            'md5': element.md5HexStr.hex() if element.md5HexStr else None,
+            'content_hash': element.contentHash.hex() if element.contentHash else None,
         }
     )
 
@@ -122,8 +162,12 @@ def parse_voice(element) -> ParsedElement:
         content={
             'filename': element.fileName,
             'size': element.fileSize,
-            'duration': element.voiceLen,  # 秒
-            'text': element.voiceText,  # 语音转文字
+            'file_path': element.filePath,
+            'file_token': element.fileToken,
+            'ptt_type': element.pttType,
+            'voice_changed': element.voiceChanged,
+            'waveform': element.waveform.hex() if element.waveform else None,
+            'text': element.voiceText,
         }
     )
 
@@ -140,6 +184,13 @@ def parse_video(element) -> ParsedElement:
             'path': element.videoPath,
             'width': element.videoWidth,
             'height': element.videoHeight,
+            'cover_width': element.mediaWidth,
+            'cover_height': element.mediaHeight,
+            'cover_filename': element.coverFileName,
+            'file_token': element.fileToken,
+            'video_token': element.videoToken,
+            'expire_timestamp': element.expireTimestamp,
+            'valid_period': element.validPeriodSec,
         }
     )
 
@@ -160,6 +211,12 @@ def parse_emoji(element) -> ParsedElement:
             'emoji_id': element.emojiId,
             'text': emoji_text,
             'raw_text': element.emojiText,  # 原始外显文字（未经查表回退）
+            'sub_type': element.subType,
+            'extended_description': element.faceExtDesc or None,
+            'super_category': element.superEmojiCategory or None,
+            'animated_sticker_id': element.animatedStickerId or None,
+            'dice_value': element.diceValue or None,
+            'can_chain': element.canChain,
         }
     )
 
@@ -167,126 +224,179 @@ def parse_emoji(element) -> ParsedElement:
 @ElementParser.register(7)
 def parse_quote(element) -> ParsedElement:
     """解析引用消息（递归解析被引用的内容）"""
-    quoted_content = None
-    if element.quotedElement and element.quotedElement.type:
-        quoted_elem = ElementParser.parse(element.quotedElement)
-        if quoted_elem:
-            quoted_content = quoted_elem.content
+    quoted_elements = [
+        ElementParser.parse(quoted_element)
+        for quoted_element in element.origElements
+    ]
 
     return ParsedElement(
         type=ElementType.QUOTE,
         content={
-            'sender_uid': element.senderUid,
-            'sender_num': element.senderNum,
-            'quoted_timestamp': element.quotedTimestamp,
-            'quoted_content': quoted_content,
-            'summary': element.quotedSummary,  # 原消息文本摘要（降级兜底，原始字段 47413）
+            'sender_uid': element.origSenderUid,
+            'receiver_uid': element.origReceiverUid,
+            'sender_num': element.origSenderNum,
+            'receiver_num': element.origReceiverNum,
+            'orig_msg_id': str(element.origMsgId) if element.origMsgId else None,
+            'orig_msg_id_ref': (
+                str(element.replyOrigMsgIdRef)
+                if element.replyOrigMsgIdRef else None
+            ),
+            'orig_msg_seq': element.origMsgSeq or None,
+            'orig_msg_index': element.origMsgIndex or None,
+            'quoted_timestamp': element.origMsgTime,
+            'quoted_elements': quoted_elements,
+            'summary': element.replyTextSummary,
         }
     )
 
 
 @ElementParser.register(8)
 def parse_notice(element) -> ParsedElement:
-    """解析系统提示消息
-
-    type 8（grayTipElement）涵盖三种子情况，统一在 content['notice_type'] 中标注：
-    - 'withdraw'：撤回提示（存在 recallerUid 字段）
-    - 'interactive'：互动提示（拍一拍/戳一戳，XML 内含多个 <qq uin> + <nor txt>）
-    - 'generic'：其他普通灰字提示
-
-    解析层只抽取原始字段（uid、原文等），uid→显示名 的解析交给导出层。
-    """
-    from unicodedata import category
-    from lxml import etree as lxml_etree
-    from ast import literal_eval
-    import re
-
-    notice_text = ""
-
-    if element.noticeInfo:
-        # 清理字符串
-        info = element.noticeInfo.replace(r'\/', '/').replace('　', ' ')
-        info = ''.join(char for char in info if category(char) not in ('Cf', 'Cc'))
-
-        try:
-            recover_parser = lxml_etree.XMLParser(recover=True)
-            try:
-                root = lxml_etree.fromstring(info)
-            except lxml_etree.XMLSyntaxError:
-                root = lxml_etree.fromstring(info.encode("utf-8"), parser=recover_parser)
-
-            texts = [elem.get('txt') for elem in root.findall('.//nor') if elem.get('txt')]
-            notice_text = " ".join(texts)
-        except Exception:
-            notice_text = element.noticeInfo
-
-    elif element.noticeInfo2:
-        try:
-            info2_dict = literal_eval(element.noticeInfo2.replace(r"\/", "/"))
-            texts = [item.get("txt", "") for item in info2_dict.get("items", [])]
-            notice_text = " ".join(texts)
-        except Exception:
-            notice_text = element.noticeInfo2
-
+    """解析撤回、戳一戳、入群/移除/解散、禁言和邀请等灰条。"""
+    raw = element.noticeInfo or element.noticeInfo2
     content = {
-        'text': notice_text or "[系统提示]",
-        'raw': element.noticeInfo or element.noticeInfo2,  # 原始 XML/字典字符串
+        'text': _notice_text(element.noticeInfo, element.noticeInfo2),
+        'raw': raw,
+        'sub_type': element.subType,
         'notice_type': 'generic',
     }
 
-    # 撤回提示：存在撤回者 UID
-    if element.recallerUid:
-        content['notice_type'] = 'withdraw'
-        content['recaller_uid'] = element.recallerUid
-        content['recaller_name'] = element.recallerName  # 后备名（不可靠）
-        content['suffix'] = element.recallSuffix
-    elif element.noticeInfo:
-        # 互动提示（拍一拍/戳一戳）：XML 内含至少两个 <qq uin> 与 <nor txt>
-        uids = re.findall(r'<qq uin="([^"]+)"', element.noticeInfo)
-        nor_texts = re.findall(r'<nor txt="([^"]*)"', element.noticeInfo)
-        if len(uids) >= 2 and nor_texts:
-            content['notice_type'] = 'interactive'
-            content['actor_uid'] = uids[0]
-            content['target_uid'] = uids[1]
-            content['verb'] = nor_texts[0]
-            content['suffix'] = nor_texts[1] if len(nor_texts) > 1 else ''
+    if element.subType == 1 or element.recallSenderUid or element.recallRevokeUid:
+        recalled_elements = [
+            ElementParser.parse(recalled)
+            for recalled in element.recallElements
+        ]
+        content.update({
+            'notice_type': 'withdraw',
+            'sender_uid': element.recallSenderUid or None,
+            'recaller_uid': element.recallRevokeUid or element.recallSenderUid or None,
+            'sender_name': element.recallSenderName or None,
+            'recaller_name': element.recallRevokeName or element.recallSenderName or None,
+            'display_text': element.recallDisplayText or None,
+            'recalled_elements': recalled_elements,
+        })
+    elif element.subType == 4 or element.groupTipType:
+        event_names = {1: 'join', 2: 'dismiss', 3: 'remove'}
+        mute_info = None
+        if element.HasField('muteInfo'):
+            mute_info = {
+                'operator_uid': element.muteInfo.operator.uid or None,
+                'target_uid': element.muteInfo.mutedUser.uid or None,
+                'target_name': element.muteInfo.mutedUser.groupNickname or None,
+                'timestamp': element.muteInfo.timestamp or None,
+                'duration': element.muteInfo.duration,
+            }
+        content.update({
+            'notice_type': 'group',
+            'group_event': event_names.get(element.groupTipType, 'generic'),
+            'group_tip_type': element.groupTipType,
+            'user1_uid': element.groupTipUser1Uid or None,
+            'user1_name': element.groupTipUser1Card or element.groupTipUser1Name or None,
+            'user2_uid': element.groupTipUser2Uid or None,
+            'user2_name': element.groupTipUser2Card or element.groupTipUser2Name or None,
+            'mute_info': mute_info,
+        })
+    elif element.subType in (12, 17) or element.actionId:
+        notice_type = 'action'
+        if element.actionId == 12 or element.actionDetailId == 1061 or '戳' in content['text']:
+            notice_type = 'interactive'
+        elif '邀请' in content['text']:
+            notice_type = 'invite'
+        elif element.actionId == 16 or '红包' in content['text']:
+            notice_type = 'wallet'
+        content.update({
+            'notice_type': notice_type,
+            'actor_uid': element.actionInitiator.uid or None,
+            'actor_name': element.actionInitiator.nickname or None,
+            'target_uid': element.actionTarget.uid or None,
+            'target_name': element.actionTarget.nickname or None,
+            'action_id': element.actionId,
+            'action_detail_id': element.actionDetailId,
+            'business_id': element.actionBusinessId,
+            'action_unique_id': element.actionUniqueId,
+            'attributes': [
+                {'key': attr.key, 'value': attr.value}
+                for attr in element.actionAttributes
+            ],
+        })
 
-    return ParsedElement(
-        type=ElementType.NOTICE,
-        content=content
-    )
+    content['text'] = content['text'] or content.get('display_text') or "[系统提示]"
+    return ParsedElement(type=ElementType.NOTICE, content=content)
+
+
+def _notice_text(xml_text: str, json_text: str) -> str:
+    """从灰条 XML/JSON 中尽可能提取可读文本。"""
+    import json
+    from unicodedata import category
+    from lxml import etree as lxml_etree
+
+    if xml_text:
+        cleaned = xml_text.replace(r'\/', '/').replace('　', ' ')
+        cleaned = ''.join(char for char in cleaned if category(char) not in ('Cf', 'Cc'))
+        try:
+            root = lxml_etree.fromstring(
+                cleaned.encode('utf-8'),
+                parser=lxml_etree.XMLParser(recover=True),
+            )
+            parts = []
+            for node in root.iter():
+                value = node.get('txt') or node.get('nm')
+                if value:
+                    parts.append(value)
+            return ' '.join(parts)
+        except Exception:
+            return cleaned
+
+    if json_text:
+        try:
+            payload = json.loads(json_text.replace(r'\/', '/'))
+            return ' '.join(
+                item.get('txt') or item.get('nm') or ''
+                for item in payload.get('items', [])
+            ).strip()
+        except Exception:
+            return json_text
+    return ''
 
 
 @ElementParser.register(9)
 def parse_red_packet(element) -> ParsedElement:
-    """解析红包消息"""
+    """解析红包和转账消息。"""
+    detail = element.walletDetail
+    wallet_type = element.walletRedbagType or detail.redbagType
     return ParsedElement(
         type=ElementType.RED_PACKET,
         content={
-            'prompt': element.redPacket.prompt,
-            'summary': element.redPacket.summary,
-            'greeting': element.redPacket.greeting if hasattr(element.redPacket, 'greeting') else None,
+            'wallet_type': 'transfer' if wallet_type == 1 else 'red_packet',
+            'redbag_type': wallet_type,
+            'target_num': element.walletTargetNum or None,
+            'order_id': element.walletOrderId or None,
+            'prompt': detail.prompt,
+            'summary': detail.display,
+            'greeting': detail.title,
+            'subtitle': detail.subtitle,
+            'cover': element.walletExt.cover or None,
         }
     )
 
 
 @ElementParser.register(10)
-def parse_application(element, forward_cache_bytes: Optional[bytes] = None) -> ParsedElement:
+def parse_application(
+    element,
+    forward_messages: Optional[list[ParsedMessage]] = None,
+) -> ParsedElement:
     """解析应用消息（小程序、分享卡片等）
 
     Args:
         element: protobuf Element 对象
-        forward_cache_bytes: 合并转发的 40900 缓存字段（仅当 msg_type==8 时传入）
+        forward_messages: 已解析的 40900 子消息（兼容旧版 Ark 转发卡片）
     """
     content = {
         'raw': element.applicationMessage,
     }
 
-    # 尝试展开合并转发（仅当提供了 forward_cache_bytes 时）
-    if forward_cache_bytes:
-        forward_messages = _parse_forward_cache(forward_cache_bytes)
-        if forward_messages:
-            content['forward_messages'] = forward_messages
+    if forward_messages:
+        content['forward_messages'] = forward_messages
 
     return ParsedElement(
         type=ElementType.APPLICATION,
@@ -303,6 +413,15 @@ def parse_market_face(element) -> ParsedElement:
             'text': element.marketFaceText,  # 外显文本，如 "[贴贴]"
             'package_id': element.marketFacePackageId,
             'key': element.marketFaceKey,
+            'market_type': element.marketFaceType,
+            'preview_md5': (
+                element.marketFacePreviewMd5.hex()
+                if element.marketFacePreviewMd5 else None
+            ),
+            'preview_width': element.marketFacePreviewWidth,
+            'preview_height': element.marketFacePreviewHeight,
+            'media_type': element.marketFaceMediaType,
+            'animated': element.marketFaceAnimated,
         }
     )
 
@@ -310,22 +429,70 @@ def parse_market_face(element) -> ParsedElement:
 @ElementParser.register(14)
 def parse_markdown(element) -> ParsedElement:
     """解析 markdown 消息（常见于机器人）"""
+    flash_transfer = None
+    if element.HasField('flashTransferInfo'):
+        info = element.flashTransferInfo
+        flash_transfer = {
+            'file_set_id': info.fileSetId,
+            'thumbnail_name': info.thumbnailName,
+            'file_size': info.fileBytes,
+            'thumbnail_file_id': info.thumbnail.fileId,
+            'thumbnail_url': info.thumbnail.urlInfo.url,
+            'create_time': info.createTime,
+        }
     return ParsedElement(
         type=ElementType.MARKDOWN,
         content={
             'text': element.markdownText,
+            'summary': element.markdownSummary,
+            'flash_transfer': flash_transfer,
         }
     )
 
 
 @ElementParser.register(16)
-def parse_xml(element) -> ParsedElement:
-    """解析 XML 消息"""
+def parse_multi_msg(
+    element,
+    forward_messages: Optional[list[ParsedMessage]] = None,
+) -> ParsedElement:
+    """解析合并转发卡片及其 40900 子消息。"""
+    content = {
+        'res_id': element.multiMsgResId,
+        'xml': element.xmlContent,
+        'session_id': element.multiMsgSessionId,
+    }
+    if forward_messages:
+        content['forward_messages'] = forward_messages
     return ParsedElement(
-        type=ElementType.XML,
+        type=ElementType.MULTI_MSG,
+        content=content,
+    )
+
+
+@ElementParser.register(17)
+def parse_markdown_buttons(element) -> ParsedElement:
+    """解析 QQ Bot Markdown 按钮组。"""
+    rows = []
+    for row in element.markdownButtonRows:
+        rows.append([
+            {
+                'id': button.id,
+                'label': button.label or button.visitedLabel,
+                'visited_label': button.visitedLabel or None,
+                'style': button.style,
+                'action_type': button.actionType,
+                'action': button.action or None,
+                'data': button.data or None,
+                'permission_type': button.permissionType,
+            }
+            for button in row.buttons
+        ])
+    return ParsedElement(
+        type=ElementType.MARKDOWN_BUTTON,
         content={
-            'xml': element.xmlContent,
-        }
+            'app_id': element.markdownButtonAppId,
+            'rows': rows,
+        },
     )
 
 
@@ -336,8 +503,20 @@ def parse_call(element) -> ParsedElement:
         type=ElementType.CALL,
         content={
             'status': element.callStatus,
-            'text': element.callText,
+            'text': ' '.join(element.callSummary),
+            'answer_type': element.callAnswerType,
+            'duration_ms': element.callDurationMs,
+            'method': element.callMethod,
         }
+    )
+
+
+@ElementParser.register(23)
+def parse_online_file(element) -> ParsedElement:
+    """解析在线文件。"""
+    return ParsedElement(
+        type=ElementType.ONLINE_FILE,
+        content=_online_file_content(element),
     )
 
 
@@ -348,8 +527,9 @@ def parse_bubble_face(element) -> ParsedElement:
         type=ElementType.BUBBLE_FACE,
         content={
             'summary': element.bubbleFaceSummary,  # 外显摘要，如 "[平底锅]x10"
-            'emoji_id': element.emojiId,
-            'emoji_text': element.emojiText,
+            'emoji_id': element.bubbleFaceId,
+            'emoji_text': element.bubbleFaceName or element.bubbleFacePcText,
+            'pc_text': element.bubbleFacePcText,
         }
     )
 
@@ -382,11 +562,40 @@ def parse_feed(element) -> ParsedElement:
     return ParsedElement(
         type=ElementType.FEED,
         content={
-            'title': element.feedTitle.text if element.feedTitle else None,
-            'content': element.feedContent.text if element.feedContent else None,
-            'url': element.feedUrl,
+            'dynamic_type': element.dynamicType,
+            'dynamic_id': element.dynamicId,
+            'title': element.dynamicDescription.main or None,
+            'subtitle': element.dynamicDescription.sub or None,
+            'content': element.dynamicDescription2.main or None,
+            'content_subtitle': element.dynamicDescription2.sub or None,
+            'cover_url': element.dynamicCoverUrl or None,
+            'logo_url': element.dynamicLogoUrl or None,
+            'publisher_num': element.dynamicPublisherNum or None,
+            'metadata': element.dynamicMetadata or None,
+            'tags': [tag.content for tag in element.dynamicTags if tag.content],
         }
     )
+
+
+@ElementParser.register(30)
+def parse_online_folder(element) -> ParsedElement:
+    """解析在线文件夹。"""
+    return ParsedElement(
+        type=ElementType.ONLINE_FOLDER,
+        content=_online_file_content(element),
+    )
+
+
+def _online_file_content(element) -> dict:
+    return {
+        'filename': element.fileName,
+        'size': element.fileSize,
+        'file_path': element.filePath,
+        'file_token': element.fileToken,
+        'transfer_flag': element.transferFlag,
+        'width': element.mediaWidth,
+        'height': element.mediaHeight,
+    }
 
 
 # ============================================================================
@@ -405,85 +614,54 @@ def _parse_forward_cache(cache_bytes: bytes) -> list[ParsedMessage]:
     if not cache_bytes:
         return []
 
-    forwarded_messages = []
-    offset = 0
+    cache = element_pb2.ForwardedMessages()
+    try:
+        cache.ParseFromString(cache_bytes)
+    except DecodeError as exc:
+        logger.warning("failed to decode 40900 message cache: %s", exc)
+        return []
 
-    # 40900 字段是 repeated，手动解析每条子消息（tag=40900, wire_type=2）
-    while offset < len(cache_bytes):
-        try:
-            # 读取 varint tag
-            tag, offset = _read_varint(cache_bytes, offset)
-            field_num = tag >> 3
-            wire_type = tag & 0x7
-
-            if field_num != 40900 or wire_type != 2:  # 期望 tag=40900, wire_type=length-delimited
-                logger.warning(f"unexpected tag in 40900: field={field_num}, wire={wire_type}")
-                break
-
-            # 读取 length
-            length, offset = _read_varint(cache_bytes, offset)
-            sub_msg_bytes = cache_bytes[offset:offset + length]
-            offset += length
-
-            # 解析子消息
-            fwd_msg = element_pb2.ForwardedMessage()
-            fwd_msg.ParseFromString(sub_msg_bytes)
-
-            # 解析子消息的 messageBody（40800 字段）
-            # 40800 是 Elements（repeated Element），与主消息解析逻辑一致
-            elements_list = []
-            if fwd_msg.messageBody:
-                try:
-                    # 解析为 Elements（标准结构）
-                    els = element_pb2.Elements()
-                    els.ParseFromString(fwd_msg.messageBody)
-                    for e in els.elements:
-                        parsed = ElementParser.parse(e)
-                        if parsed:
-                            elements_list.append(parsed)
-                except Exception:
-                    # 降级：尝试解析为单个 Element（旧版兼容）
-                    try:
-                        elem = element_pb2.Element()
-                        elem.ParseFromString(fwd_msg.messageBody)
-                        parsed = ElementParser.parse(elem)
-                        if parsed:
-                            elements_list.append(parsed)
-                    except Exception as e:
-                        logger.warning(f"failed to parse forwarded message body: {e}")
-
-            # 构建 ParsedMessage（子消息）
-            # 优先使用 timestampAlt，但需用 is not None 判断以支持值为 0 的情况
-            parsed_msg = ParsedMessage(
-                msg_id=str(fwd_msg.msgId),
-                sender_uid=fwd_msg.senderUid,
-                sender_num=fwd_msg.senderNum,
-                timestamp=fwd_msg.timestampAlt if fwd_msg.timestampAlt is not None and fwd_msg.timestampAlt != 0 else fwd_msg.timestamp,
-                elements=elements_list,
-            )
-            forwarded_messages.append(parsed_msg)
-
-        except Exception as e:
-            logger.warning(f"failed to parse forward cache at offset {offset}: {e}")
-            break
-
-    return forwarded_messages
+    return [_parse_forwarded_message(message) for message in cache.messages]
 
 
-def _read_varint(buf: bytes, offset: int) -> tuple[int, int]:
-    """读取 protobuf varint，返回 (值, 新偏移量)"""
-    result = 0
-    shift = 0
-    while True:
-        if offset >= len(buf):
-            raise ValueError("varint extends beyond buffer")
-        byte = buf[offset]
-        offset += 1
-        result |= (byte & 0x7f) << shift
-        if not (byte & 0x80):
-            break
-        shift += 7
-    return result, offset
+def _parse_forwarded_message(message) -> ParsedMessage:
+    """递归转换一条 40900 消息缓存记录。"""
+    nested_messages = [
+        _parse_forwarded_message(sub_message)
+        for sub_message in message.subMessages
+    ]
+    elements = [
+        ElementParser.parse(element, nested_messages)
+        for element in message.elements
+    ]
+    quoted_msg_id, quoted_msg_seq = _quote_reference(elements)
+
+    return ParsedMessage(
+        msg_id=str(message.msgId),
+        seq=message.msgSeq,
+        sender_uid=message.senderUid,
+        sender_num=message.senderNum,
+        timestamp=message.sendTime,
+        elements=elements,
+        quoted_msg_id=quoted_msg_id,
+        quoted_msg_seq=quoted_msg_seq,
+        sender_nickname=message.senderNickname or None,
+    )
+
+
+def _quote_reference(
+    elements: list[ParsedElement],
+) -> tuple[Optional[str], Optional[int]]:
+    """从引用元素提取原消息雪花 ID 和序列号。"""
+    for element in elements:
+        if element.type != ElementType.QUOTE:
+            continue
+        msg_id = (
+            element.content.get('orig_msg_id')
+            or element.content.get('orig_msg_id_ref')
+        )
+        return msg_id, element.content.get('orig_msg_seq')
+    return None, None
 
 
 @lru_cache(maxsize=4096)

@@ -191,10 +191,12 @@ class HTMLExporter(BaseExporter):
         chat_type = '群聊' if meta.get('type') == 'group' else '私聊'
         export_time = datetime.fromtimestamp(int(time.time())).strftime('%Y-%m-%d %H:%M')
 
-        # 构建消息映射（用于引用查找）
+        # 同时按雪花 ID 和 seq 建立映射；新数据优先使用雪花 ID。
         all_messages = [msg for _, msgs in messages_by_date for msg in msgs]
-        # 用 seq 建立映射（quoted_msg_id 是 seq）
-        message_map = {str(msg.seq): msg for msg in all_messages}
+        message_map = {}
+        for message in all_messages:
+            message_map[message.msg_id] = message
+            message_map.setdefault(str(message.seq), message)
 
         # 生成时间轴项
         timeline_items_html = []
@@ -266,11 +268,15 @@ class HTMLExporter(BaseExporter):
 
         # 构建消息内容
         content_html = self._render_message_content(msg.elements, member_map)
+        reactions_html = self._render_reactions(msg.reactions)
 
         # 引用消息（查找被引用的消息内容）
         quoted_html = ''
-        if msg.quoted_msg_id:
-            quoted_msg = message_map.get(msg.quoted_msg_id)
+        quote_key = msg.quoted_msg_id or (
+            str(msg.quoted_msg_seq) if msg.quoted_msg_seq else None
+        )
+        if quote_key:
+            quoted_msg = message_map.get(quote_key)
             if quoted_msg:
                 # 获取被引用消息的发送者
                 quoted_sender = member_map.get(quoted_msg.sender_uid)
@@ -288,10 +294,19 @@ class HTMLExporter(BaseExporter):
 </div>
             '''
             else:
-                # 被引用的消息不存在（可能在导出范围外）
+                quote_element = next(
+                    (element for element in msg.elements
+                     if element.type == ElementType.QUOTE),
+                    None,
+                )
+                quote_content = quote_element.content if quote_element else {}
+                embedded = quote_content.get('quoted_elements', [])
+                preview = self._extract_text_content(embedded) if embedded else ''
+                preview = preview[:50] + ('...' if len(preview) > 50 else '')
+                preview = preview or '引用了一条消息'
                 quoted_html = f'''
 <div class="quote">
-    <div class="quote-content">引用了一条消息</div>
+    <div class="quote-content">{html.escape(preview)}</div>
 </div>
             '''
 
@@ -307,6 +322,7 @@ class HTMLExporter(BaseExporter):
             {quoted_html}
             {content_html}
         </div>
+        {reactions_html}
     </div>
 </div>
         '''
@@ -335,19 +351,24 @@ class HTMLExporter(BaseExporter):
                 if img_html:
                     parts.append(img_html)
 
-            elif elem.type == ElementType.FILE:
+            elif elem.type in (ElementType.FILE, ElementType.ONLINE_FILE):
                 filename = html.escape(elem.content.get('filename', ''))
                 parts.append(f'<div class="text">[文件: {filename}]</div>')
 
+            elif elem.type == ElementType.ONLINE_FOLDER:
+                filename = html.escape(elem.content.get('filename', ''))
+                parts.append(f'<div class="text">[文件夹: {filename}]</div>')
+
             elif elem.type == ElementType.VOICE:
-                duration = elem.content.get('duration', 0)
-                parts.append(f'<div class="text">[语音 {duration}秒]</div>')
+                text = elem.content.get('text')
+                label = f'[语音: {text}]' if text else '[语音]'
+                parts.append(f'<div class="text">{html.escape(label)}</div>')
 
             elif elem.type == ElementType.VIDEO:
                 filename = html.escape(elem.content.get('filename', ''))
                 parts.append(f'<div class="text">[视频: {filename}]</div>')
 
-            elif elem.type == ElementType.APPLICATION:
+            elif elem.type in (ElementType.APPLICATION, ElementType.MULTI_MSG):
                 # 检查是否为转发消息
                 fwd_msgs = elem.content.get('forward_messages', [])
                 if fwd_msgs:
@@ -362,20 +383,53 @@ class HTMLExporter(BaseExporter):
 
             elif elem.type == ElementType.RED_PACKET:
                 prompt = html.escape(elem.content.get('prompt', ''))
-                parts.append(f'<div class="text">[红包: {prompt}]</div>')
+                label = '转账' if elem.content.get('wallet_type') == 'transfer' else '红包'
+                parts.append(f'<div class="text">[{label}: {prompt}]</div>')
+
+            elif elem.type == ElementType.CALL:
+                text = elem.content.get('text') or '[通话]'
+                duration_ms = elem.content.get('duration_ms') or 0
+                if duration_ms:
+                    text = f'{text} ({duration_ms // 1000}秒)'
+                parts.append(f'<div class="text">{html.escape(text)}</div>')
+
+            elif elem.type in (ElementType.MARKDOWN, ElementType.BOT):
+                flash = elem.content.get('flash_transfer')
+                if flash:
+                    name = flash.get('thumbnail_name') or flash.get('file_set_id') or ''
+                    parts.append(f'<div class="text">[闪传: {html.escape(name)}]</div>')
+                else:
+                    text = elem.content.get('summary') or elem.content.get('text') or '[消息]'
+                    parts.append(f'<div class="text">{html.escape(text)}</div>')
+
+            elif elem.type == ElementType.MARKDOWN_BUTTON:
+                rows = []
+                for row in elem.content.get('rows', []):
+                    buttons = ''.join(
+                        f'<span class="bot-button">{html.escape(button.get("label") or "按钮")}</span>'
+                        for button in row
+                    )
+                    if buttons:
+                        rows.append(f'<div class="bot-button-row">{buttons}</div>')
+                if rows:
+                    parts.append(f'<div class="bot-buttons">{"".join(rows)}</div>')
+
+            elif elem.type == ElementType.LOCATION:
+                text = elem.content.get('text') or '位置共享'
+                parts.append(f'<div class="text">[位置: {html.escape(text)}]</div>')
 
             elif elem.type == ElementType.FEED:
                 title = elem.content.get('title')
+                subtitle = elem.content.get('subtitle')
                 content = elem.content.get('content')
-                url = elem.content.get('url')
 
                 feed_parts = []
                 if title:
                     feed_parts.append(f'<strong>{html.escape(title)}</strong>')
                 if content:
                     feed_parts.append(html.escape(content))
-                if url:
-                    feed_parts.append(f'<a href="{html.escape(url)}" target="_blank">查看详情</a>')
+                if subtitle:
+                    feed_parts.append(html.escape(subtitle))
 
                 if feed_parts:
                     parts.append(f'<div class="text">📰 {" | ".join(feed_parts)}</div>')
@@ -387,6 +441,25 @@ class HTMLExporter(BaseExporter):
                 parts.append(f'<div class="text">[{elem.type.name}]</div>')
 
         return ''.join(parts) if parts else '<div class="text">[空消息]</div>'
+
+    def _render_reactions(self, reactions: list) -> str:
+        if not reactions:
+            return ''
+        from emojis import emojis
+
+        items = []
+        for reaction in reactions:
+            try:
+                emoji_key = int(reaction.emoji_id)
+            except (TypeError, ValueError):
+                emoji_key = reaction.emoji_id
+            label = emojis.get(emoji_key, reaction.emoji_id or '表情')
+            self_class = ' is-self' if reaction.is_self else ''
+            items.append(
+                f'<span class="reaction{self_class}">'
+                f'{html.escape(str(label))} {reaction.count}</span>'
+            )
+        return f'<div class="reactions">{"".join(items)}</div>'
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
@@ -488,8 +561,10 @@ class HTMLExporter(BaseExporter):
                 parts.append(elem.content.get('text', ''))
             elif elem.type == ElementType.IMAGE:
                 parts.append('[图片]')
-            elif elem.type == ElementType.FILE:
+            elif elem.type in (ElementType.FILE, ElementType.ONLINE_FILE):
                 parts.append('[文件]')
+            elif elem.type == ElementType.ONLINE_FOLDER:
+                parts.append('[文件夹]')
             elif elem.type == ElementType.VOICE:
                 parts.append('[语音]')
             elif elem.type == ElementType.VIDEO:
@@ -497,6 +572,17 @@ class HTMLExporter(BaseExporter):
             elif elem.type in (ElementType.EMOJI, ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
                 text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
                 parts.append(text)
+            elif elem.type in (ElementType.MARKDOWN, ElementType.BOT):
+                parts.append(elem.content.get('summary') or elem.content.get('text') or '[消息]')
+            elif elem.type == ElementType.MARKDOWN_BUTTON:
+                labels = [
+                    button.get('label', '')
+                    for row in elem.content.get('rows', [])
+                    for button in row
+                    if button.get('label')
+                ]
+                if labels:
+                    parts.append(f"[按钮: {' | '.join(labels)}]")
         return ''.join(parts) or '[消息]'
 
     def _format_notice_text(self, content: dict, member_map: dict[str, ParsedMember]) -> str:
@@ -506,8 +592,26 @@ class HTMLExporter(BaseExporter):
         if notice_type == 'withdraw':
             recaller_uid = content.get('recaller_uid', '')
             recaller = member_map.get(recaller_uid)
-            recaller_name = recaller.get_display_name() if recaller else recaller_uid
-            return f"{recaller_name} 撤回了一条消息"
+            recaller_name = (recaller.get_display_name() if recaller else None) \
+                or content.get('recaller_name') or recaller_uid or '某人'
+            return content.get('display_text') or f"{recaller_name} 撤回了一条消息"
+
+        if notice_type in ('interactive', 'invite'):
+            actor = member_map.get(content.get('actor_uid', ''))
+            target = member_map.get(content.get('target_uid', ''))
+            actor_name = (actor.get_display_name() if actor else None) \
+                or content.get('actor_name') or '某人'
+            target_name = (target.get_display_name() if target else None) \
+                or content.get('target_name') or '某人'
+            verb = '邀请了' if notice_type == 'invite' else '戳了戳'
+            return content.get('text') or f'{actor_name} {verb} {target_name}'
+
+        if notice_type == 'group' and content.get('mute_info'):
+            mute = content['mute_info']
+            target = member_map.get(mute.get('target_uid', ''))
+            target_name = (target.get_display_name() if target else None) \
+                or mute.get('target_name') or '某人'
+            return content.get('text') or f"{target_name} 被禁言 {mute.get('duration', 0)} 秒"
 
         # 其他类型直接返回原始文本
         return content.get('text', '[系统消息]')
@@ -887,6 +991,51 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .is-self .bubble {{
             background: var(--bubble-self);
             color: var(--text-self);
+        }}
+
+        .reactions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 5px;
+        }}
+
+        .is-self .reactions {{
+            justify-content: flex-end;
+        }}
+
+        .reaction {{
+            padding: 2px 7px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 12px;
+        }}
+
+        .reaction.is-self {{
+            border-color: var(--bubble-self);
+            color: var(--bubble-self);
+        }}
+
+        .bot-buttons {{
+            display: grid;
+            gap: 6px;
+            margin-top: 6px;
+        }}
+
+        .bot-button-row {{
+            display: flex;
+            gap: 6px;
+        }}
+
+        .bot-button {{
+            flex: 1;
+            padding: 6px 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            text-align: center;
+            font-size: 13px;
         }}
 
         .text {{

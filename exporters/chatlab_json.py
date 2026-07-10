@@ -172,6 +172,33 @@ class ChatLabJSONExporter(BaseExporter):
         if not elements:
             return 99  # OTHER
 
+        # 新版转发使用 MULTI_MSG(16)，旧版数据可能是带 40900 的 Ark(10)。
+        if any(
+            element.type == ElementType.MULTI_MSG
+            or (
+                element.type == ElementType.APPLICATION
+                and element.content.get('forward_messages')
+            )
+            for element in elements
+        ):
+            return 26  # FORWARD
+
+        for element in elements:
+            if element.type == ElementType.RED_PACKET:
+                if element.content.get('wallet_type') == 'transfer':
+                    return 21  # TRANSFER
+            elif element.type == ElementType.NOTICE:
+                notice_type = element.content.get('notice_type')
+                if notice_type == 'withdraw':
+                    return 81  # RECALL
+                if notice_type == 'interactive':
+                    return 22  # POKE
+            elif (
+                element.type == ElementType.MARKDOWN
+                and element.content.get('flash_transfer')
+            ):
+                return 4  # FILE
+
         # ChatLab 类型映射
         type_mapping = {
             ElementType.TEXT: 0,        # TEXT
@@ -179,6 +206,8 @@ class ChatLabJSONExporter(BaseExporter):
             ElementType.VOICE: 2,       # VOICE
             ElementType.VIDEO: 3,       # VIDEO
             ElementType.FILE: 4,        # FILE
+            ElementType.ONLINE_FILE: 4, # FILE
+            ElementType.ONLINE_FOLDER: 4, # FILE
             ElementType.EMOJI: 5,       # EMOJI
             ElementType.MARKET_FACE: 5, # EMOJI（商城表情）
             ElementType.BUBBLE_FACE: 5, # EMOJI（弹射表情）
@@ -189,9 +218,10 @@ class ChatLabJSONExporter(BaseExporter):
             ElementType.CALL: 23,       # CALL
             ElementType.FEED: 24,       # SHARE
             ElementType.MARKDOWN: 0,    # TEXT（markdown）
+            ElementType.MARKDOWN_BUTTON: 99, # OTHER（Bot 按钮）
             ElementType.BOT: 0,         # TEXT（机器人对话）
-            ElementType.XML: 99,        # OTHER
-            ElementType.LOCATION: 99,   # OTHER（位置共享）
+            ElementType.MULTI_MSG: 26,  # FORWARD
+            ElementType.LOCATION: 8,    # LOCATION
             ElementType.OTHER: 99,      # OTHER
         }
 
@@ -232,17 +262,20 @@ class ChatLabJSONExporter(BaseExporter):
                 if img:
                     parts.append(img)
 
-            elif elem.type == ElementType.FILE:
+            elif elem.type in (ElementType.FILE, ElementType.ONLINE_FILE):
                 filename = elem.content.get('filename', '')
                 parts.append(f"[文件: {filename}]" if filename else "[文件]")
 
+            elif elem.type == ElementType.ONLINE_FOLDER:
+                filename = elem.content.get('filename', '')
+                parts.append(f"[文件夹: {filename}]" if filename else "[文件夹]")
+
             elif elem.type == ElementType.VOICE:
-                duration = elem.content.get('duration', 0)
                 text = elem.content.get('text', '')
                 if text:
                     parts.append(f"[语音: {text}]")
                 else:
-                    parts.append(f"[语音 {duration}秒]")
+                    parts.append("[语音]")
 
             elif elem.type == ElementType.VIDEO:
                 filename = elem.content.get('filename', '')
@@ -263,7 +296,8 @@ class ChatLabJSONExporter(BaseExporter):
 
             elif elem.type == ElementType.RED_PACKET:
                 prompt = elem.content.get('prompt', '')
-                parts.append(f"[红包: {prompt}]" if prompt else "[红包]")
+                label = "转账" if elem.content.get('wallet_type') == 'transfer' else "红包"
+                parts.append(f"[{label}: {prompt}]" if prompt else f"[{label}]")
 
             elif elem.type == ElementType.CALL:
                 text = elem.content.get('text', '')
@@ -271,10 +305,15 @@ class ChatLabJSONExporter(BaseExporter):
 
             elif elem.type == ElementType.FEED:
                 title = elem.content.get('title', '')
-                parts.append(f"[动态: {title}]" if title else "[动态]")
+                subtitle = elem.content.get('subtitle', '') or elem.content.get('content', '')
+                detail = f"{title}{(' | ' + subtitle) if subtitle else ''}"
+                parts.append(f"[动态: {detail}]" if detail else "[动态]")
 
             elif elem.type == ElementType.APPLICATION:
                 parts.append(self._format_application(elem.content))
+
+            elif elem.type == ElementType.MULTI_MSG:
+                parts.append("[合并转发]")
 
             elif elem.type == ElementType.MARKET_FACE:
                 text = elem.content.get('text', '')
@@ -292,12 +331,23 @@ class ChatLabJSONExporter(BaseExporter):
                 parts.append(text if text else "[表情]")
 
             elif elem.type == ElementType.MARKDOWN or elem.type == ElementType.BOT:
-                text = elem.content.get('text', '')
-                parts.append(text if text else "[消息]")
+                flash = elem.content.get('flash_transfer')
+                if flash:
+                    filename = flash.get('thumbnail_name') or flash.get('file_set_id')
+                    parts.append(f"[闪传: {filename}]" if filename else "[闪传文件]")
+                else:
+                    text = elem.content.get('summary') or elem.content.get('text', '')
+                    parts.append(text if text else "[消息]")
 
-            elif elem.type == ElementType.XML:
-                xml = elem.content.get('xml', '')
-                parts.append(xml if xml else "[XML消息]")
+            elif elem.type == ElementType.MARKDOWN_BUTTON:
+                labels = [
+                    button.get('label', '')
+                    for row in elem.content.get('rows', [])
+                    for button in row
+                    if button.get('label')
+                ]
+                if labels:
+                    parts.append(f"[按钮: {' | '.join(labels)}]")
 
             elif elem.type == ElementType.LOCATION:
                 text = elem.content.get('text', '')
@@ -338,15 +388,38 @@ class ChatLabJSONExporter(BaseExporter):
         if ntype == 'withdraw':
             name = (self._resolve_name(c.get('recaller_uid'), member_map)
                     or c.get('recaller_name') or "某人")
-            suffix = c.get('suffix') or ''
-            return f"[{name} 撤回了一条消息{(' ' + suffix) if suffix else ''}]"
+            return c.get('display_text') or f"[{name} 撤回了一条消息]"
 
         if ntype == 'interactive':
-            actor = self._resolve_name(c.get('actor_uid'), member_map) or "某人"
-            target = self._resolve_name(c.get('target_uid'), member_map) or "某人"
-            verb = c.get('verb') or "戳了戳"
-            suffix = c.get('suffix') or ''
-            return f"{actor} {verb} {target}{suffix}"
+            actor = (self._resolve_name(c.get('actor_uid'), member_map)
+                     or c.get('actor_name') or "某人")
+            target = (self._resolve_name(c.get('target_uid'), member_map)
+                      or c.get('target_name') or "某人")
+            return c.get('text') or f"{actor} 戳了戳 {target}"
+
+        if ntype == 'invite':
+            actor = (self._resolve_name(c.get('actor_uid'), member_map)
+                     or c.get('actor_name') or "某人")
+            target = (self._resolve_name(c.get('target_uid'), member_map)
+                      or c.get('target_name') or "某人")
+            return c.get('text') or f"{actor} 邀请了 {target}"
+
+        if ntype == 'group':
+            if c.get('mute_info'):
+                mute = c['mute_info']
+                target = (self._resolve_name(mute.get('target_uid'), member_map)
+                          or mute.get('target_name') or "某人")
+                duration = mute.get('duration') or 0
+                return c.get('text') or f"{target} 被禁言 {duration} 秒"
+            event = c.get('group_event')
+            user = (self._resolve_name(c.get('user1_uid'), member_map)
+                    or c.get('user1_name') or "某人")
+            fallback = {
+                'join': f"{user} 加入了群聊",
+                'dismiss': "群聊已解散",
+                'remove': f"{user} 被移出群聊",
+            }.get(event, "[群提示]")
+            return c.get('text') or fallback
 
         text = c.get('text', '')
         return text if text else "[系统提示]"

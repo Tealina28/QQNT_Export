@@ -1,4 +1,5 @@
 from collections import defaultdict
+import logging
 
 from sqlalchemy import String, LargeBinary, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -13,6 +14,7 @@ __all__ = ["C2cMessage", "GroupMessage", "UidMapping", "ProfileInfo", "GroupList
 profile_map = {}
 group_map = {}
 member_map = defaultdict(dict)
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -51,7 +53,7 @@ class Message():
     # protobuf, insufficient resource, related with a file?
     UNK_30: Mapped[bytes] = mapped_column("40605", LargeBinary)
     sender_num: Mapped[int] = mapped_column("40033")  # qq num
-    UNK_33: Mapped[int] = mapped_column("40062")
+    reactions_body: Mapped[bytes] = mapped_column("40062", LargeBinary)
     UNK_34: Mapped[int] = mapped_column("40083")
     UNK_35: Mapped[int] = mapped_column("40084")
 
@@ -61,7 +63,8 @@ class Message():
         try:
             elements.ParseFromString(self.message_body)
             return elements
-        except:
+        except Exception as exc:
+            logger.warning("failed to decode message body: msg_id=%s error=%s", self.id, exc)
             return elements
 
 

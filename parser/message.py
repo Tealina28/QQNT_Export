@@ -5,11 +5,17 @@
 """
 
 from typing import Optional
+import logging
+
+import element_pb2
 
 from db import DatabaseManager
 from db.models import C2cMessage, GroupMessage, ProfileInfo, GroupMember
-from .models import ParsedMessage, ParsedMember, ParsedElement
-from .elements import ElementParser
+from .models import ParsedMessage, ParsedMember, ParsedElement, ParsedReaction
+from .elements import ElementParser, _parse_forward_cache, _quote_reference
+
+
+logger = logging.getLogger(__name__)
 
 
 class MessageParser:
@@ -35,7 +41,10 @@ class MessageParser:
         Returns:
             ParsedMessage 对象
         """
-        elements = self._parse_elements(msg)
+        elements, cached_messages = self._parse_elements(msg)
+        quoted_msg_id, quoted_msg_seq = self._resolve_quote_reference(
+            msg, elements, cached_messages
+        )
 
         return ParsedMessage(
             msg_id=str(msg.id),
@@ -44,7 +53,9 @@ class MessageParser:
             sender_num=msg.sender_num,
             timestamp=msg.time,
             elements=elements,
-            quoted_msg_id=str(msg.quoted_seq) if msg.quoted_seq else None,
+            quoted_msg_id=quoted_msg_id,
+            quoted_msg_seq=quoted_msg_seq,
+            reactions=self._parse_reactions(msg),
         )
 
     def parse_group_message(self, msg: GroupMessage) -> ParsedMessage:
@@ -56,7 +67,10 @@ class MessageParser:
         Returns:
             ParsedMessage 对象
         """
-        elements = self._parse_elements(msg)
+        elements, cached_messages = self._parse_elements(msg)
+        quoted_msg_id, quoted_msg_seq = self._resolve_quote_reference(
+            msg, elements, cached_messages
+        )
 
         return ParsedMessage(
             msg_id=str(msg.id),
@@ -65,42 +79,84 @@ class MessageParser:
             sender_num=msg.sender_num,
             timestamp=msg.time,
             elements=elements,
-            quoted_msg_id=str(msg.quoted_seq) if msg.quoted_seq else None,
+            quoted_msg_id=quoted_msg_id,
+            quoted_msg_seq=quoted_msg_seq,
+            reactions=self._parse_reactions(msg),
             # 群聊特有字段
             group_num=msg.mixed_group_num,
             sender_nickname=msg.nickname,
             sender_card=msg.group_name_card,
         )
 
-    def _parse_elements(self, msg) -> list[ParsedElement]:
+    def _parse_elements(
+        self,
+        msg,
+    ) -> tuple[list[ParsedElement], list[ParsedMessage]]:
         """解析消息中的所有元素
 
         Args:
             msg: C2cMessage 或 GroupMessage 对象
 
         Returns:
-            ParsedElement 列表
+            (ParsedElement 列表, 40900 缓存消息列表)
         """
-        elements = []
-        # 提取 40900 字段（合并转发缓存，仅当 msg_type==8 时有效）
-        forward_cache = None
-        if hasattr(msg, 'msg_type') and msg.msg_type == 8 and hasattr(msg, 'UNK_18'):
-            forward_cache = msg.UNK_18
+        cached_messages = []
+        cache_bytes = getattr(msg, 'UNK_18', None)
+        if getattr(msg, 'msg_type', None) in (8, 9) and cache_bytes:
+            cached_messages = _parse_forward_cache(cache_bytes)
 
+        elements = [
+            ElementParser.parse(element, cached_messages)
+            for element in msg.elements.elements
+        ]
+        return elements, cached_messages
+
+    @staticmethod
+    def _resolve_quote_reference(
+        msg,
+        elements: list[ParsedElement],
+        cached_messages: list[ParsedMessage],
+    ) -> tuple[Optional[str], Optional[int]]:
+        """优先使用引用元素的原消息 ID，再回退到 40900 缓存。"""
+        quoted_msg_id, quoted_msg_seq = _quote_reference(elements)
+
+        if getattr(msg, 'msg_type', None) == 9 and cached_messages:
+            cached = cached_messages[0]
+            quoted_msg_id = quoted_msg_id or cached.msg_id
+            quoted_msg_seq = quoted_msg_seq or cached.seq
+
+        if not quoted_msg_seq:
+            quoted_msg_seq = getattr(msg, 'quoted_seq', None) or None
+
+        return quoted_msg_id, quoted_msg_seq
+
+    @staticmethod
+    def _parse_reactions(msg) -> list[ParsedReaction]:
+        """解析消息列 40062 中的群贴表情。"""
+        blob = getattr(msg, 'reactions_body', None)
+        if not blob:
+            return []
+
+        reactions = element_pb2.EmojiStickers()
         try:
-            for element in msg.elements.elements:
-                # type=10 需要传入 forward_cache
-                if element.type == 10:
-                    parsed = ElementParser.parse(element, forward_cache)
-                else:
-                    parsed = ElementParser.parse(element)
-                if parsed:
-                    elements.append(parsed)
-        except Exception as e:
-            # 解析失败时返回空列表，避免崩溃
-            pass
+            reactions.ParseFromString(blob)
+        except Exception as exc:
+            logger.warning(
+                "failed to decode message reactions: msg_id=%s error=%s",
+                getattr(msg, 'id', ''),
+                exc,
+            )
+            return []
 
-        return elements
+        return [
+            ParsedReaction(
+                emoji_id=reaction.emojiId,
+                count=reaction.count,
+                is_self=reaction.isSelf,
+                set_flag=reaction.setFlag,
+            )
+            for reaction in reactions.stickers
+        ]
 
     def get_c2c_member(self, uid: str) -> Optional[ParsedMember]:
         """获取私聊对象的成员信息

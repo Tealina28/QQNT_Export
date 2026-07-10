@@ -40,5 +40,6 @@ chatpic/
 *.tmp
 .cache/
 
-# AI 辅助文档（本地供 Claude Code 加载，不纳入版本库）
+# AI 辅助文档（本地供编码代理加载，不纳入版本库）
 /CLAUDE.md
+/AGENTS.md

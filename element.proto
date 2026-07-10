@@ -2,10 +2,105 @@ syntax = "proto3";
 
 message Elements {repeated Element elements = 40800;}
 
+message ActionUser {
+  string uid = 1005;
+  string nickname = 1006;
+}
+
+message ActionAttribute {
+  string key = 1005;
+  string value = 1006;
+}
+
+message MuteOperator {string uid = 1000;}
+
+message MutedUser {
+  string uid = 1000;
+  string groupNickname = 20002;
+}
+
+message MuteInfo {
+  MuteOperator operator = 48521;
+  MutedUser mutedUser = 48522;
+  uint64 timestamp = 48531;
+  uint32 duration = 48532;
+}
+
+message FlashTransferThumbUrl {
+  uint32 type = 1;
+  string url = 2;
+}
+
+message FlashTransferThumbAlt {
+  string fileId = 1;
+  FlashTransferThumbUrl urlInfo = 2;
+}
+
+message FlashTransferInfo {
+  string fileSetId = 1;
+  string thumbnailName = 2;
+  uint32 fileBytes = 3;
+  FlashTransferThumbAlt thumbnail = 4;
+  uint32 createTime = 6;
+}
+
+message MarkdownButton {
+  string id = 48754;
+  string label = 48755;
+  string visitedLabel = 48756;
+  uint32 style = 48757;
+  uint32 actionType = 48758;
+  uint32 permissionType = 48759;
+  string data = 48760;
+  string action = 48761;
+  uint32 clickLimit = 48762;
+  uint32 enter = 48763;
+}
+
+message MarkdownButtonRow {repeated MarkdownButton buttons = 48753;}
+
+message DynamicDescription {
+  string main = 48178;
+  string sub = 48179;
+}
+
+message DynamicTag {
+  bool enabled = 48191;
+  uint32 id = 48192;
+  string content = 48193;
+}
+
+message WalletDetail {
+  uint32 flag = 48441;
+  uint32 redbagType = 48442;
+  string title = 48443;
+  string prompt = 48444;
+  string subtitle = 48445;
+  string display = 48448;
+  string orderUrl = 48454;
+}
+
+message WalletExt {
+  bool flag3 = 3;
+  string cover = 5;
+  bool flag7 = 7;
+  bool flag8 = 8;
+}
+
+message EmojiSticker {
+  string emojiId = 48301;
+  int32 setFlag = 48302;
+  int32 count = 48303;
+  bool isSelf = 48304;
+}
+
+message EmojiStickers {repeated EmojiSticker stickers = 40062;}
+
 message Element {
   uint64 id = 45001;
   uint32 type = 45002;
   uint32 subType = 45003; // 子元素类型，用于区分闪照/动画表情等
+  string faceExtDesc = 45004;
   // 1：文本段，2：图片段，3：文件消息，4:语音消息，5：视频，6：表情段，7：引用段，
   // 8：提示消息（中间灰色），9：红包，10：应用消息
   // 21：通话段
@@ -14,45 +109,66 @@ message Element {
 
   // 文本
   string text = 45101;
+  uint32 textReserve = 45102;
+  string bubbleId = 45105;
+  string atMentionMask = 45110;
 
 
   // 图片
   // 可引用fileName
   // 可引用fileSize
   bytes md5HexStr = 45406; // 小写
+  bytes md5HexStr2 = 45407;
+  bytes contentHash = 45408;
+  uint32 mediaWidth = 45411;
+  uint32 mediaHeight = 45412;
+  uint32 imageType = 45416;
   uint64 original = 45418; // 0 false, 1 true
-  string originImageMd5 = 45424;
+  bytes originImageMd5 = 45424; // 部分版本存 16 字节原始 MD5，不保证 UTF-8
   uint64 imageIsFlash = 45829; // 1 为闪照
+
+  uint32 fileFlag45415 = 45415;
+  string fileToken = 45503;
+  string transferFlag = 45504;
+  uint32 transferState = 45550;
+  uint32 uploadTime = 45505;
+  uint32 uploadTimestamp = 45517;
+  uint32 fileTTL = 45518;
 
   string imageUrlLow = 45802;
   string imageUrlHigh = 45803;
   string imageUrlOrigin = 45804;
 
   string imageFilePath = 45812;
-
-  string imageText = 45815;
+  repeated string mediaSummary = 45815;
+  string cdnHost = 45816;
 
 
   // 文件
   string fileName = 45402;
+  string filePath = 45403;
   uint64 fileSize = 45405;
-
-  uint64 fileTimestamp = 45505; // ?
-
 
   // 语音消息
   // 可引用 fileName
   // 可引用 fileSize
   string voiceText =45923;
-  uint64 voiceLen = 45906; //单位为秒
+  uint32 pttType = 45906; // 1=对讲，2=录音
+  bool voiceChanged = 45911;
+  bytes waveform = 45925;
 
   // 视频
   // 可引用 fileName
   // 可引用 fileSize
   string videoPath = 46403;
   uint64 videoLen = 45410; //单位为秒
-  uint64 videoWidth = 45411;
-  uint64 videoHeight = 45412;
+  uint64 videoWidth = 45413;
+  uint64 videoHeight = 45414;
+  string coverFileName = 45422;
+  string videoToken = 45510;
+  uint32 expireTimestamp = 45515;
+  uint32 validPeriodSec = 45516;
+  uint32 secondExpireTimestamp = 45519;
   uint64 videoWidth2 = 46413;
   uint64 videoHeight2 = 46414;
 
@@ -61,32 +177,70 @@ message Element {
   // https://bot.q.qq.com/wiki/develop/api-v2/openapi/emoji/model.html
   uint32 emojiId = 47601;
   string emojiText = 47602;
+  string superEmojiCategory = 47603;
+  string animatedStickerId = 47604;
+  string diceValue = 47607;
+  bool canChain = 47622;
 
 
-  // 引用
-  string senderUid = 40020;
-  string interlocutorUid = 40021;
+  // 引用 / 回复
+  string origSenderUid = 40020;
+  string origReceiverUid = 40021;
 
-  uint32 senderNum = 47403;
-  uint32 quotedTimestamp = 47404;
-  uint32 interlocutorNum = 47411;
-  string quotedSummary = 47413; // 被引用原消息的文本摘要（降级兜底）
-
-  Element quotedElement = 47423;
+  uint64 replyOrigMsgIdRef = 47401;
+  uint32 origMsgSeq = 47402;
+  uint32 origSenderNum = 47403;
+  uint32 origMsgTime = 47404;
+  uint32 origReceiverNum = 47411;
+  string replyTextSummary = 47413; // 被引用原消息的文本摘要（降级兜底）
+  bool replyFlag47415 = 47415;
+  uint64 origMsgId = 47416;
+  bool replyFlag47418 = 47418;
+  uint32 origMsgIndex = 47419;
+  uint64 replyFlag47422 = 47422;
+  repeated Element origElements = 47423;
 
 
   // 提示消息
+  ActionUser actionTarget = 43210;
+  ActionUser actionInitiator = 48210;
+  uint32 actionId = 48211;
+  uint32 actionDetailId = 48212;
+  uint32 actionTypeFlag = 48213;
   string noticeInfo = 48214;
-  string noticeInfo2 = 48271; // ?
+  uint32 actionBusinessId = 48215;
+  uint32 actionUniqueId = 48216;
+  repeated ActionAttribute actionAttributes = 48217;
+  string noticeInfo2 = 48271;
+  uint32 noticeTipType = 48273;
 
-  // 撤回提示（grayTipElement, type 8 的子情况）
-  string recallerUid = 47703;  // 撤回者 UID
-  string recallerName = 47705; // 撤回者昵称（后备，不可靠）
-  string recallSuffix = 47713; // 撤回后缀文本，如 "你猜猜撤回了什么。"
+  // 撤回提示（subType=1）
+  uint32 recallFlag = 47702;
+  string recallSenderUid = 47703;
+  string recallRevokeUid = 47704;
+  string recallSenderName = 47705;
+  repeated Element recallElements = 47710;
+  string recallDisplayText = 47713;
+  string recallRevokeName = 47714;
+
+  // 群提示（subType=4）
+  uint32 groupTipType = 48501;
+  string groupTipUser1Uid = 48503;
+  string groupTipUser1Name = 48504;
+  string groupTipUser1Card = 48505;
+  string groupTipUser2Uid = 48506;
+  string groupTipUser2Name = 48507;
+  string groupTipUser2Card = 48508;
+  MuteInfo muteInfo = 48541;
 
 
-  // 红包
-  RedPacket redPacket = 48403;
+  // 红包 / 转账
+  uint32 walletTargetNum = 48401;
+  bytes walletTransferProto = 48402;
+  WalletDetail walletDetail = 48403;
+  string walletOrderId = 48409;
+  uint32 walletRedbagType = 48412; // 1=转账，2=普通红包，6=口令，15=语音
+  WalletExt walletExt = 48421;
 
 
   // 应用消息
@@ -94,19 +248,22 @@ message Element {
 
 
   // 通话消息
+  uint32 callAnswerType = 48151;
+  uint32 callDurationMs = 48152;
   string callStatus = 48153;
-  string callText = 48157;
+  uint32 callMethod = 48154; // 1=语音，2=视频，3=屏幕共享，5=远程协助
+  repeated string callSummary = 48157;
 
   // 动态消息
-  FeedMessage feedTitle = 48175;
-  FeedMessage feedContent = 48176;
-
-  string feedUrl = 48180;
-  string feedLogoUrl = 48181;
-  uint32 feedPublisherNum = 48182;
-
-  string feedJumpInfo = 48183;
-  string feedPublisherUid = 48188;
+  uint32 dynamicType = 48172;
+  string dynamicId = 48173;
+  DynamicDescription dynamicDescription = 48175;
+  DynamicDescription dynamicDescription2 = 48176;
+  string dynamicCoverUrl = 48180;
+  string dynamicLogoUrl = 48181;
+  uint32 dynamicPublisherNum = 48182;
+  string dynamicMetadata = 48183;
+  repeated DynamicTag dynamicTags = 48189;
 
 
   // 商城表情（marketFaceElement, type 11）
@@ -114,43 +271,68 @@ message Element {
   string marketFaceText = 80900;
   uint64 marketFacePackageId = 80810; // 表情包 ID
   string marketFaceKey = 80824;       // 表情字符 ID（Key）
+  uint32 marketFaceType = 80901;
+  bool marketFaceSubType = 80902;
+  bytes marketFacePreviewMd5 = 80903;
+  uint32 marketFaceMediaType = 80905;
+  uint32 marketFacePreviewWidth = 80909;
+  uint32 marketFacePreviewHeight = 80910;
+  bool marketFaceAnimated = 80935;
 
 
   // markdown / 机器人消息 / markdown 按钮（type 14、17、44）
   string markdownText = 48701;
+  bytes markdownMetadata = 48702;
+  bytes markdownFlag = 48703;
+  string markdownExtra = 48704;
+  string markdownSummary = 48705;
+  uint32 markdownTypeFlag = 48706;
+  bytes flashTransferProto1 = 48707;
+  FlashTransferInfo flashTransferInfo = 48708;
+  bytes flashTransferProto3 = 48711;
+
+  // QQ Bot Markdown 按钮（type 17）
+  repeated MarkdownButtonRow markdownButtonRows = 48751;
+  uint32 markdownButtonAppId = 48752;
 
 
-  // XML 消息（type 16）
+  // 合并转发卡片（type 16）
+  string multiMsgResId = 48601;
   string xmlContent = 48602;
+  string multiMsgSessionId = 48603;
 
 
   // 弹射/平底锅表情（faceBubbleElement, type 27）
   // 摘要，如 "[平底锅]x10"
+  uint32 bubbleFaceId = 52132;
+  bool bubbleFaceFlag = 52133;
+  string bubbleFaceName = 52134;
   string bubbleFaceSummary = 52138;
+  string bubbleFacePcText = 52139;
 
 
   // 位置共享（shareLocationElement, type 28）
   string locationText = 52152;
 }
 
-message FeedMessage {string text = 48178;}
-
-message RedPacket {
-  string greeting = 48443;
-  string prompt = 48444;
-  string redPacketType = 48445;
-  string summary = 48448;
-}
-
-// 合并转发消息的子消息结构（解析 40900 字段）
+// 40900 消息缓存。合并转发和引用都使用该结构，且可递归嵌套。
 message ForwardedMessage {
-  uint64 msgId = 40001;           // 子消息 ID
-  uint32 timestamp = 40002;       // 发送时间（秒级时间戳，需 *1000 转毫秒）
-  uint32 msgType = 40011;         // 消息类型（2=文本等）
-  string senderUid = 40020;       // 发送者 UID
-  uint32 senderNum = 40033;       // 发送者 QQ 号
-  uint32 timestampAlt = 40050;    // 另一个时间戳字段（通常与 40002 相同或更精确）
-  bytes messageBody = 40800;      // 标准 Elements protobuf（可递归解析）
-  uint32 quotedSeq = 40850;       // 被引用消息序列号（若此子消息引用了其他消息）
-  // 嵌套转发：子消息本身也可能是转发消息，递归包含更多 ForwardedMessage
+  int64 msgId = 40001;
+  uint32 msgRandom = 40002;
+  uint32 msgSeq = 40003;
+  bool isSender = 40010;
+  uint32 msgType = 40011;
+  uint32 msgSubType = 40012;
+  uint32 sendType = 40013;
+  string senderUid = 40020;
+  string peerUid = 40021;
+  uint32 senderNum = 40033;
+  uint32 sendStatus = 40041;
+  uint32 sendTime = 40050;
+  uint32 sendDayStartTime = 40058;
+  string senderNickname = 40093;
+  repeated Element elements = 40800;
+  repeated ForwardedMessage subMessages = 40900;
 }
+
+message ForwardedMessages {repeated ForwardedMessage messages = 40900;}
