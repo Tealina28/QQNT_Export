@@ -4,6 +4,7 @@
 将数据库中的消息对象转换为统一的 ParsedMessage 对象。
 """
 
+from collections.abc import Iterable
 from typing import Optional
 import logging
 
@@ -226,16 +227,18 @@ class MessageParser:
 
     def get_dataline_members(
         self,
-        messages: list[ParsedMessage],
+        messages: Iterable[ParsedMessage],
         owner_id: str = DATALINE_PC_UID,
     ) -> list[ParsedMember]:
         """构建数据线设备成员，并确保配置的 ownerId 在成员列表中。"""
         mapping = self.dbman.self_uid_mapping() if self.dbman else None
         qq_num = mapping.qq_num if mapping else 0
-        if not qq_num:
-            qq_num = next((msg.sender_num for msg in messages if msg.sender_num), 0)
-
-        uids = {msg.sender_uid for msg in messages if msg.sender_uid}
+        uids = set()
+        for msg in messages:
+            if not qq_num and msg.sender_num:
+                qq_num = msg.sender_num
+            if msg.sender_uid:
+                uids.add(msg.sender_uid)
         uids.add(owner_id)
         order = {
             DATALINE_PC_UID: 1,

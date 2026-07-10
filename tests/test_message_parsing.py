@@ -2,10 +2,12 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import element_pb2
 
 from exporters.chatlab_json import ChatLabJSONExporter
+from main import EXPORTER_MAP, export_query
 from parser.dataline import (
     DATALINE_PAD_UID,
     DATALINE_PC_UID,
@@ -37,6 +39,53 @@ def make_c2c_message(elements, **overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+class StreamingExportTests(unittest.TestCase):
+    def test_streaming_export_does_not_materialize_query(self):
+        class Query:
+            batch_size = None
+
+            def yield_per(self, batch_size):
+                self.batch_size = batch_size
+                return iter([1, 2, 3])
+
+            def all(self):
+                raise AssertionError('streaming export must not call all()')
+
+        class StreamingExporter:
+            streams_messages = True
+            exported = None
+            received_list = None
+
+            def __init__(self, output_path, config):
+                self.output_path = output_path
+
+            def get_file_extension(self):
+                return '.stream'
+
+            def export(self, meta, members, messages):
+                type(self).received_list = isinstance(messages, list)
+                type(self).exported = list(messages)
+
+        query = Query()
+        with TemporaryDirectory() as temp_dir, patch.dict(
+            EXPORTER_MAP, {'stream': StreamingExporter}, clear=True
+        ):
+            export_query(
+                query=query,
+                parse_message=lambda row: row * 10,
+                meta={},
+                members=[],
+                output_formats=['stream'],
+                output_dir=Path(temp_dir),
+                output_name='test',
+                config={'stream_batch_size': 2},
+            )
+
+        self.assertEqual(query.batch_size, 2)
+        self.assertFalse(StreamingExporter.received_list)
+        self.assertEqual(StreamingExporter.exported, [10, 20, 30])
 
 
 class ImageCachePathTests(unittest.TestCase):

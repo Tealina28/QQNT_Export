@@ -14,6 +14,8 @@ from parser.models import ParsedMessage, ParsedMember
 class BaseExporter(ABC):
     """导出器基类"""
 
+    streams_messages = False
+
     def __init__(self, output_path: Path, config: dict[str, Any]):
         """初始化导出器
 

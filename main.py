@@ -20,6 +20,9 @@ from parser.dataline import (
 from exporters import EXPORTER_MAP
 
 
+DEFAULT_STREAM_BATCH_SIZE = 1000
+
+
 class TqdmLoggingHandler(logging.Handler):
     """通过 tqdm.write 输出日志，避免与进度条互相冲刷"""
 
@@ -75,6 +78,50 @@ def create_output_dirs(
     return c2c_path, group_path, dataline_path
 
 
+def iter_parsed_messages(query, parse_message, batch_size: int):
+    """分批读取 ORM 行并逐条解析，避免整个会话常驻内存。"""
+    for row in query.yield_per(batch_size):
+        yield parse_message(row)
+
+
+def export_query(
+    query,
+    parse_message,
+    meta: dict,
+    members: list,
+    output_formats: list[str],
+    output_dir: Path,
+    output_name: str,
+    config: dict,
+):
+    """将查询导出为指定格式；纯流式格式不物化消息列表。"""
+    exporters = []
+    for format_name in output_formats:
+        exporter_cls = EXPORTER_MAP.get(format_name)
+        if not exporter_cls:
+            logging.warning(f"未知的导出格式: {format_name}")
+            continue
+        extension = exporter_cls(output_dir, config).get_file_extension()
+        output_path = output_dir / f"{sanitize_filename(output_name)}{extension}"
+        exporters.append((exporter_cls(output_path, config), output_path))
+
+    batch_size = max(1, int(config.get(
+        'stream_batch_size', DEFAULT_STREAM_BATCH_SIZE
+    )))
+    materialized_messages = None
+    for exporter, output_path in exporters:
+        if exporter.streams_messages:
+            messages = iter_parsed_messages(query, parse_message, batch_size)
+        else:
+            if materialized_messages is None:
+                materialized_messages = list(iter_parsed_messages(
+                    query, parse_message, batch_size
+                ))
+            messages = materialized_messages
+        exporter.export(meta, members, messages)
+        logging.info(f"  导出完成: {output_path.name}")
+
+
 def export_c2c_conversation(
     parser: MessageParser,
     dbman: DatabaseManager,
@@ -111,9 +158,6 @@ def export_c2c_conversation(
 
     logging.info(f"开始导出私聊: {conversation_name}")
 
-    # 解析消息
-    messages = [parser.parse_c2c_message(msg) for msg in query.all()]
-
     # 获取成员信息（私聊：我 + 对方）
     members = []
 
@@ -136,22 +180,10 @@ def export_c2c_conversation(
     if self_member:
         meta['ownerId'] = self_member.platform_id
 
-    # 导出
-    for format_name in output_formats:
-        exporter_cls = EXPORTER_MAP.get(format_name)
-        if not exporter_cls:
-            logging.warning(f"未知的导出格式: {format_name}")
-            continue
-
-        # 构建输出文件路径
-        extension = exporter_cls(output_dir, config).get_file_extension()
-        output_path = output_dir / f"{sanitize_filename(conversation_name)}{extension}"
-
-        # 导出
-        exporter = exporter_cls(output_path, config)
-        exporter.export(meta, members, messages)
-
-        logging.info(f"  导出完成: {output_path.name}")
+    export_query(
+        query, parser.parse_c2c_message, meta, members, output_formats,
+        output_dir, conversation_name, config,
+    )
 
 
 def export_group_conversation(
@@ -185,9 +217,6 @@ def export_group_conversation(
 
     logging.info(f"开始导出群聊: {conversation_name}")
 
-    # 解析消息
-    messages = [parser.parse_group_message(msg) for msg in query.all()]
-
     # 获取群成员信息
     members = parser.get_all_group_members(group_num)
 
@@ -204,22 +233,10 @@ def export_group_conversation(
     if self_member:
         meta['ownerId'] = self_member.platform_id
 
-    # 导出
-    for format_name in output_formats:
-        exporter_cls = EXPORTER_MAP.get(format_name)
-        if not exporter_cls:
-            logging.warning(f"未知的导出格式: {format_name}")
-            continue
-
-        # 构建输出文件路径
-        extension = exporter_cls(output_dir, config).get_file_extension()
-        output_path = output_dir / f"{sanitize_filename(conversation_name)}{extension}"
-
-        # 导出
-        exporter = exporter_cls(output_path, config)
-        exporter.export(meta, members, messages)
-
-        logging.info(f"  导出完成: {output_path.name}")
+    export_query(
+        query, parser.parse_group_message, meta, members, output_formats,
+        output_dir, conversation_name, config,
+    )
 
 
 def export_dataline_conversation(
@@ -232,16 +249,18 @@ def export_dataline_conversation(
     owner_id: str,
 ):
     """导出一个数据线（我的手机/电脑/平板）会话。"""
-    rows = query.all()
-    messages = [parser.parse_dataline_message(msg) for msg in rows]
+    model = query.column_descriptions[0]['entity']
+    sender_rows = list(query.with_entities(
+        model.sender_uid, model.sender_num
+    ).distinct())
     conversation_name = dataline_conversation_name(
-        (message.sender_uid for message in messages),
+        (row.sender_uid for row in sender_rows),
         owner_id,
         partition_uid,
     )
     logging.info(f"开始导出数据线: {conversation_name}")
 
-    members = parser.get_dataline_members(messages, owner_id)
+    members = parser.get_dataline_members(sender_rows, owner_id)
     meta = {
         'name': conversation_name,
         'platform': 'qq',
@@ -249,16 +268,10 @@ def export_dataline_conversation(
         'ownerId': owner_id,
     }
 
-    for format_name in output_formats:
-        exporter_cls = EXPORTER_MAP.get(format_name)
-        if not exporter_cls:
-            logging.warning(f"未知的导出格式: {format_name}")
-            continue
-
-        extension = exporter_cls(output_dir, config).get_file_extension()
-        output_path = output_dir / f"{sanitize_filename(conversation_name)}{extension}"
-        exporter_cls(output_path, config).export(meta, members, messages)
-        logging.info(f"  导出完成: {output_path.name}")
+    export_query(
+        query, parser.parse_dataline_message, meta, members, output_formats,
+        output_dir, conversation_name, config,
+    )
 
 
 def main():

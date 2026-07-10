@@ -6,6 +6,7 @@ ChatLab JSONL 格式导出器
 
 import json
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +21,13 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
     但以流式方式写入 JSONL 格式。
     """
 
+    streams_messages = True
+
     def export(
         self,
         meta: dict[str, Any],
         members: list[ParsedMember],
-        messages: list[ParsedMessage]
+        messages: Iterable[ParsedMessage]
     ):
         """导出为 ChatLab JSONL 格式（流式写入）"""
         self.ensure_output_dir()

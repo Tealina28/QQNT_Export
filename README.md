@@ -66,6 +66,7 @@ dataline_owner = "pc"    # 数据线中的本机设备：pc、phone 或 pad
 
 # 导出格式：chatlab_json 和/或 chatlab_jsonl
 output_format = ["chatlab_json", "chatlab_jsonl"]
+stream_batch_size = 1000 # JSONL 每批读取的消息数
 ```
 
 导出结果分别写入 `output/c2c/`、`output/group/` 和
