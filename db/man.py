@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, or_
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.query import Query
 
@@ -45,13 +45,31 @@ class DatabaseManager:
         model = self._models["nt_msg"]["nt_uid_mapping_table"]
         return self.session.query(model).filter_by(qq_num = num).first().uid
 
+    def _message_query(self, model):
+        """返回可导出的消息查询，过滤 QQNT 的空占位行。
+
+        msg_type=1 也可能带有有效的 40800，因此只排除 type 1 且
+        40800/40900/40801/表情反应均为 NULL 的记录。其他未知类型保留。
+        """
+        return self.session.query(model).filter(or_(
+            model.msg_type != 1,
+            model.message_body.is_not(None),
+            model.UNK_18.is_not(None),
+            model.UNK_29.is_not(None),
+            model.reactions_body.is_not(None),
+        ))
+
     def c2c_messages(self, filters):
         model = self._models["nt_msg"]["c2c_msg_table"]
-        query = self.session.query(model)
+        query = self._message_query(model)
         if filters:
             uids = [self.num_to_uid(num) for num in filters]
         else:
-            uids = [row[0] for row in self.session.query(model.interlocutor_uid).distinct().all()]
+            uids = [
+                row[0] for row in query.with_entities(
+                    model.interlocutor_uid
+                ).distinct().all()
+            ]
 
         queries = {uid: query.filter_by(interlocutor_uid = uid).order_by(model.time) for uid in uids}
 
@@ -64,8 +82,8 @@ class DatabaseManager:
         if not engine or not inspect(engine).has_table(model.__tablename__):
             return {}
 
-        query = self.session.query(model)
-        partitions = self.session.query(
+        query = self._message_query(model)
+        partitions = query.with_entities(
             model.UNK_10, model.interlocutor_uid
         ).distinct().all()
         queries = {}
@@ -89,9 +107,13 @@ class DatabaseManager:
 
     def group_messages(self, filters):
         model = self._models["nt_msg"]["group_msg_table"]
-        query = self.session.query(model)
+        query = self._message_query(model)
         if not filters:
-            filters = [row[0] for row in self.session.query(model.mixed_group_num).distinct().all()]
+            filters = [
+                row[0] for row in query.with_entities(
+                    model.mixed_group_num
+                ).distinct().all()
+            ]
         queries = {num: query.filter_by(mixed_group_num = num).order_by(model.time) for num in filters}
         return queries
 

@@ -63,6 +63,8 @@ class Message():
     @property
     def elements(self):
         elements = element_pb2.Elements()
+        if self.message_body is None:
+            return elements
         try:
             elements.ParseFromString(self.message_body)
             return elements

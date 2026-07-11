@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import element_pb2
 
+from db.models import Message
 from exporters.chatlab_json import ChatLabJSONExporter
 from exporters.html import HTMLExporter
 from main import EXPORTER_MAP, export_query
@@ -87,6 +88,15 @@ class StreamingExportTests(unittest.TestCase):
         self.assertEqual(query.batch_size, 2)
         self.assertFalse(StreamingExporter.received_list)
         self.assertEqual(StreamingExporter.exported, [10, 20, 30])
+
+
+class DatabaseMessageTests(unittest.TestCase):
+    def test_null_message_body_is_an_empty_payload_not_a_decode_error(self):
+        row = SimpleNamespace(id=123, message_body=None)
+        with self.assertNoLogs('db.models', level='WARNING'):
+            elements = Message.elements.fget(row)
+
+        self.assertEqual(len(elements.elements), 0)
 
 
 class HTMLExportTests(unittest.TestCase):
