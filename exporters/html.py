@@ -344,10 +344,11 @@ class HTMLExporter(BaseExporter):
                     quoted_content = quoted_content[:50] + '...'
 
                 quoted_html = f'''
-<div class="quote" onclick="scrollToMessage('{html.escape(quoted_msg.msg_id)}')">
+<button type="button" class="quote quote-link" data-target-message-id="{html.escape(quoted_msg.msg_id, quote=True)}" title="跳转到被引用的消息">
     <div class="quote-sender">{html.escape(quoted_sender_name)}</div>
     <div class="quote-content">{html.escape(quoted_content)}</div>
-</div>
+    <span class="quote-jump" aria-hidden="true">↗</span>
+</button>
             '''
             else:
                 quote_element = next(
@@ -1778,6 +1779,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .forward-item {{ color: var(--text-secondary); font-size: 12px; }}
         .quote {{ border-left-color: var(--accent); border-radius: 6px; }}
         .quote-sender {{ color: var(--accent); }}
+        .quote {{
+            position: relative;
+            display: block;
+            width: 100%;
+            border-top: 0;
+            border-right: 0;
+            border-bottom: 0;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+        }}
+        .quote-link {{ cursor: pointer; }}
+        .quote-link:focus-visible {{
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }}
+        .quote-jump {{
+            position: absolute;
+            top: 7px;
+            right: 8px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            opacity: .65;
+        }}
 
         .system-message {{
             display: flex;
@@ -2205,6 +2230,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             target.classList.add('message-highlight');
             setTimeout(() => target.classList.remove('message-highlight'), 1800);
         }}
+
+        document.addEventListener('click', event => {{
+            const quote = event.target.closest(
+                '.quote-link[data-target-message-id]'
+            );
+            if (!quote) return;
+            event.preventDefault();
+            scrollToMessage(quote.dataset.targetMessageId);
+        }});
 
         function scrollToDate(dateId) {{
             const target = document.getElementById('date-' + dateId);
