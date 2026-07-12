@@ -55,7 +55,8 @@ class HTMLExporter(BaseExporter):
                         # 尝试查询这个 UID 的信息
                         try:
                             member = parser.get_c2c_member(uid)
-                            member_map[uid] = member
+                            if member:
+                                member_map[uid] = member
                         except:
                             pass  # 查询失败，保持 UID
             except:
@@ -219,7 +220,7 @@ class HTMLExporter(BaseExporter):
             sender_uids,
             key=lambda item: (
                 member_map[item].get_display_name()
-                if item in member_map else item
+                if member_map.get(item) else item
             ),
         ):
             member = member_map.get(uid)
