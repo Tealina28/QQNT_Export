@@ -718,15 +718,16 @@ def compute_image_cache_paths(
     return tuple(paths)
 
 
+@lru_cache(maxsize=4096)
 def compute_image_cache_path(
     md5: str,
     original: int,
     pic_path: Optional[Path],
 ) -> Optional[Path]:
-    """返回首个实际存在的图片缓存，均不存在时保留原首选路径。"""
+    """返回首个实际存在的图片缓存，并缓存本次运行的检查结果。"""
     candidates = compute_image_cache_paths(md5, original, pic_path)
     for path in candidates:
         if path.is_file():
             return path
 
-    return candidates[0] if candidates else None
+    return None

@@ -115,7 +115,7 @@ class HTMLExporter(BaseExporter):
                     original = elem.content.get('original', 0)
                     if md5:
                         src_path = compute_image_cache_path(md5, original, pic_path_obj)
-                        if src_path and src_path.exists():
+                        if src_path:
                             ext = src_path.suffix or '.jpg'
                             dst_filename = f"{md5}{ext}"
                             dst_path = images_dir / dst_filename
@@ -593,7 +593,7 @@ class HTMLExporter(BaseExporter):
                 original = content.get('original', 0)
                 src_path = compute_image_cache_path(md5, original, pic_path_obj)
 
-                if src_path and src_path.exists():
+                if src_path:
                     # 计算从 HTML 文件到图片的相对路径
                     try:
                         # 使用 os.path.relpath 计算相对路径

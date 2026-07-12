@@ -508,7 +508,7 @@ class ChatLabJSONExporter(BaseExporter):
                 if md5:
                     # 计算源路径
                     src_path = compute_image_cache_path(md5, original, pic_path_obj)
-                    if src_path and src_path.exists():
+                    if src_path:
                         # 目标路径：resources/images/{md5}.jpg
                         ext = src_path.suffix or '.jpg'
                         dst_filename = f"{md5}{ext}"
