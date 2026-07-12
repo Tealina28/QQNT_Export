@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
 
 import element_pb2
 from .man import DatabaseManager
+from .protobuf import sanitize_protobuf
 
 __all__ = [
     "C2cMessage", "DatalineMessage", "GroupMessage", "UidMapping",
@@ -63,13 +64,45 @@ class Message():
     @property
     def elements(self):
         elements = element_pb2.Elements()
+        self._message_body_recovery = None
         if self.message_body is None:
             return elements
+        raw_body = bytes(self.message_body)
         try:
-            elements.ParseFromString(self.message_body)
+            elements.ParseFromString(raw_body)
             return elements
         except Exception as exc:
-            logger.warning("failed to decode message body: msg_id=%s error=%s", self.id, exc)
+            cleaned, dropped = sanitize_protobuf(
+                raw_body, element_pb2.Elements.DESCRIPTOR
+            )
+            if dropped and cleaned != raw_body:
+                try:
+                    elements.ParseFromString(cleaned)
+                except Exception:
+                    pass
+                else:
+                    self._message_body_recovery = {
+                        'raw_hex': raw_body.hex(),
+                        'parse_error': str(exc),
+                        'dropped_fields': dropped,
+                    }
+                    logger.debug(
+                        'recovered message body: msg_id=%s dropped_fields=%s',
+                        self.id,
+                        len(dropped),
+                    )
+                    return elements
+
+            logger.warning(
+                "failed to decode message body: msg_id=%s error=%s",
+                self.id,
+                exc,
+            )
+            self._message_body_recovery = {
+                'raw_hex': raw_body.hex(),
+                'parse_error': str(exc),
+                'dropped_fields': dropped,
+            }
             return elements
 
 

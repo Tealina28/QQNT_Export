@@ -24,7 +24,13 @@ from .dataline import (
     DATALINE_PHONE_UID,
     dataline_device_name,
 )
-from .models import ParsedMessage, ParsedMember, ParsedElement, ParsedReaction
+from .models import (
+    ElementType,
+    ParsedElement,
+    ParsedMember,
+    ParsedMessage,
+    ParsedReaction,
+)
 from .elements import ElementParser, _parse_forward_cache, _quote_reference
 
 
@@ -122,10 +128,23 @@ class MessageParser:
         if getattr(msg, 'msg_type', None) in (8, 9) and cache_bytes:
             cached_messages = _parse_forward_cache(cache_bytes)
 
+        raw_elements = msg.elements
         elements = [
             ElementParser.parse(element, cached_messages)
-            for element in msg.elements.elements
+            for element in raw_elements.elements
         ]
+        recovery = getattr(msg, '_message_body_recovery', None)
+        if recovery:
+            elements.append(ParsedElement(
+                type=ElementType.OTHER,
+                content={
+                    'raw_type': 0,
+                    'raw_hex': recovery['raw_hex'],
+                    'parse_error': recovery['parse_error'],
+                    'dropped_fields': recovery['dropped_fields'],
+                    'recovered_message_body': True,
+                },
+            ))
         return elements, cached_messages
 
     @staticmethod

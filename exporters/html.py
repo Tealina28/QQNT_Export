@@ -397,6 +397,8 @@ class HTMLExporter(BaseExporter):
         parts = []
 
         for elem in elements:
+            if elem.content.get('recovered_message_body'):
+                continue
             # 跳过 QUOTE 类型（引用消息已在外层处理）
             if elem.type == ElementType.QUOTE:
                 continue
@@ -661,6 +663,8 @@ class HTMLExporter(BaseExporter):
         """提取消息的纯文本内容（用于引用预览）"""
         parts = []
         for elem in elements:
+            if elem.content.get('recovered_message_body'):
+                continue
             # 跳过 QUOTE 类型（避免递归引用）
             if elem.type == ElementType.QUOTE:
                 continue

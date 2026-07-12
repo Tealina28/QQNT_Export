@@ -169,6 +169,13 @@ class ChatLabJSONExporter(BaseExporter):
         2. 如果多个元素，优先返回非文本元素的类型
         3. 如果都是文本，返回 TEXT (0)
         """
+        semantic_elements = [
+            element for element in elements
+            if not element.content.get('recovered_message_body')
+        ]
+        if semantic_elements:
+            elements = semantic_elements
+
         if not elements:
             return 99  # OTHER
 
@@ -254,6 +261,8 @@ class ChatLabJSONExporter(BaseExporter):
         parts = []
 
         for elem in elements:
+            if elem.content.get('recovered_message_body'):
+                continue
             if elem.type == ElementType.TEXT:
                 parts.append(elem.content.get('text', ''))
 
