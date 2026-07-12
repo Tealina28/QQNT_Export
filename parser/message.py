@@ -293,26 +293,21 @@ class MessageParser:
             .first()
         )
 
-        if not member:
-            return None
+        return self._parse_group_member(member)
 
-        # 角色判断：根据 QQ 的实际情况
-        # manager_flag: 0=普通成员, 1=管理员, 2=群主（推测，需实际数据验证）
-        is_owner = False
-        is_admin = False
-        if hasattr(member, 'manager_flag'):
-            if member.manager_flag == 2:
-                is_owner = True
-            elif member.manager_flag == 1:
-                is_admin = True
+    @staticmethod
+    def _parse_group_member(member) -> Optional[ParsedMember]:
+        """将群成员 ORM 转为统一模型，忽略 QQNT 的空占位行。"""
+        if not member or not member.uid:
+            return None
 
         return ParsedMember(
             platform_id=member.uid,
             qq_num=member.qq_num,
             nickname=member.nickname or "",
             group_nickname=member.group_name_card,
-            is_owner=is_owner,
-            is_admin=is_admin,
+            is_owner=member.manager_flag == 2,
+            is_admin=member.manager_flag == 1,
         )
 
     def get_all_group_members(self, group_num: int) -> list[ParsedMember]:
@@ -329,28 +324,15 @@ class MessageParser:
         members = (
             self.dbman.session.query(GroupMember)
             .filter(GroupMember.group_number == group_num)
+            .filter(GroupMember.uid.is_not(None))
+            .filter(GroupMember.uid != '')
             .all()
         )
 
         result = []
         for member in members:
-            # 角色判断
-            is_owner = False
-            is_admin = False
-            if hasattr(member, 'manager_flag'):
-                if member.manager_flag == 2:
-                    is_owner = True
-                elif member.manager_flag == 1:
-                    is_admin = True
-
-            parsed = ParsedMember(
-                platform_id=member.uid,
-                qq_num=member.qq_num,
-                nickname=member.nickname or "",
-                group_nickname=member.group_name_card,
-                is_owner=is_owner,
-                is_admin=is_admin,
-            )
-            result.append(parsed)
+            parsed = self._parse_group_member(member)
+            if parsed:
+                result.append(parsed)
 
         return result

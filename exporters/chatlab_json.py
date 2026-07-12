@@ -5,6 +5,7 @@ ChatLab JSON 格式导出器
 """
 
 import json
+import logging
 import shutil
 import time
 from pathlib import Path
@@ -13,6 +14,9 @@ from typing import Any, Optional
 from parser.models import ParsedMessage, ParsedMember, ElementType
 from parser.elements import compute_image_cache_path
 from .base import BaseExporter
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatLabJSONExporter(BaseExporter):
@@ -77,8 +81,15 @@ class ChatLabJSONExporter(BaseExporter):
         result = []
 
         for member in members:
+            if not member.platform_id:
+                logger.warning(
+                    'skip member without platform id: qq_num=%s nickname=%r',
+                    member.qq_num,
+                    member.nickname,
+                )
+                continue
             member_data = {
-                "platformId": member.platform_id,
+                "platformId": str(member.platform_id),
                 "accountName": member.nickname or str(member.qq_num),
             }
 
