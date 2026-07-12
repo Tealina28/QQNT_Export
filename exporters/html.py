@@ -329,11 +329,28 @@ class HTMLExporter(BaseExporter):
 
         # 引用消息（查找被引用的消息内容）
         quoted_html = ''
-        quote_key = msg.quoted_msg_id or (
-            str(msg.quoted_msg_seq) if msg.quoted_msg_seq else None
+        quote_element = next(
+            (element for element in msg.elements
+             if element.type == ElementType.QUOTE),
+            None,
         )
-        if quote_key:
-            quoted_msg = message_map.get(quote_key)
+        quote_content = quote_element.content if quote_element else {}
+        quote_keys = []
+        for value in (
+            quote_content.get('orig_msg_id_ref'),
+            msg.quoted_msg_id,
+            msg.quoted_msg_seq,
+        ):
+            if value:
+                key = str(value)
+                if key not in quote_keys:
+                    quote_keys.append(key)
+
+        if quote_keys:
+            quoted_msg = next(
+                (message_map[key] for key in quote_keys if key in message_map),
+                None,
+            )
             if quoted_msg:
                 # 获取被引用消息的发送者
                 quoted_sender = member_map.get(quoted_msg.sender_uid)
@@ -352,12 +369,6 @@ class HTMLExporter(BaseExporter):
 </button>
             '''
             else:
-                quote_element = next(
-                    (element for element in msg.elements
-                     if element.type == ElementType.QUOTE),
-                    None,
-                )
-                quote_content = quote_element.content if quote_element else {}
                 embedded = quote_content.get('quoted_elements', [])
                 preview = self._extract_text_content(embedded) if embedded else ''
                 preview = preview[:50] + ('...' if len(preview) > 50 else '')
@@ -1197,7 +1208,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 8px;
             margin-bottom: 6px;
             font-size: 14px;
-            cursor: pointer;
+            cursor: default;
             transition: background 0.2s;
             border-left: 3px solid var(--bubble-self);
         }}
