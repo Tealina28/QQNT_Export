@@ -6,13 +6,10 @@ ChatLab JSON 格式导出器
 
 import json
 import logging
-import shutil
 import time
-from pathlib import Path
 from typing import Any, Optional
 
 from parser.models import ParsedMessage, ParsedMember, ElementType
-from parser.elements import compute_image_cache_path
 from .base import BaseExporter
 
 
@@ -31,17 +28,10 @@ class ChatLabJSONExporter(BaseExporter):
         """导出为 ChatLab JSON 格式"""
         self.ensure_output_dir()
 
-        # 初始化资源目录（为 HTML 导出做准备，但不在 ChatLab JSON 中体现）
-        resources_dir = self.output_path.parent / 'resources'
-        resources_dir.mkdir(exist_ok=True)
-        for subdir in ['images', 'videos', 'audios', 'files']:
-            (resources_dir / subdir).mkdir(exist_ok=True)
-
         # 构建成员映射
         member_map = {m.platform_id: m for m in members}
 
-        # 构建消息并落地资源
-        messages_data = self._build_messages(messages, member_map, resources_dir)
+        messages_data = self._build_messages(messages, member_map)
 
         data = {
             "chatlab": {
@@ -115,9 +105,9 @@ class ChatLabJSONExporter(BaseExporter):
         self,
         messages: list[ParsedMessage],
         member_map: dict[str, ParsedMember],
-        resources_dir: Path
+        *_legacy_args: object,
     ) -> list[dict[str, Any]]:
-        """构建 messages 字段并落地资源"""
+        """构建 messages 字段。"""
         result = []
         for msg in messages:
             message_data = {
@@ -138,9 +128,6 @@ class ChatLabJSONExporter(BaseExporter):
                 group_nickname = msg.sender_card or msg.sender_nickname
                 if group_nickname:
                     message_data["groupNickname"] = group_nickname
-
-            # 落地图片资源（不在 ChatLab JSON 中体现，为 HTML 导出做准备）
-            self._copy_image_resources(msg.elements, resources_dir)
 
             result.append(message_data)
 
@@ -483,40 +470,3 @@ class ChatLabJSONExporter(BaseExporter):
 
         # 兜底：用 prompt 外显，否则标注应用消息
         return prompt if prompt else "[应用消息]"
-
-    def _copy_image_resources(
-        self,
-        elements: list,
-        resources_dir: Path
-    ):
-        """落地图片资源（不在 ChatLab JSON 中体现，为 HTML 导出做准备）
-
-        Args:
-            elements: ParsedElement 列表
-            resources_dir: 资源根目录
-        """
-        pic_path = self.config.get('pic_path')
-        pic_path_obj = Path(pic_path) if pic_path else None
-
-        if not pic_path_obj:
-            return
-
-        for elem in elements:
-            if elem.type == ElementType.IMAGE:
-                md5 = elem.content.get('md5')
-                original = elem.content.get('original', 0)
-                if md5:
-                    # 计算源路径
-                    src_path = compute_image_cache_path(md5, original, pic_path_obj)
-                    if src_path:
-                        # 目标路径：resources/images/{md5}.jpg
-                        ext = src_path.suffix or '.jpg'
-                        dst_filename = f"{md5}{ext}"
-                        dst_path = resources_dir / 'images' / dst_filename
-
-                        # 复制文件（去重：已存在则跳过）
-                        if not dst_path.exists():
-                            try:
-                                shutil.copy2(src_path, dst_path)
-                            except Exception:
-                                pass  # 静默失败，不阻断导出

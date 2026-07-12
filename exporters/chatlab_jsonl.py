@@ -7,7 +7,6 @@ ChatLab JSONL 格式导出器
 import json
 import time
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 from parser.models import ParsedMessage, ParsedMember
@@ -31,12 +30,6 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
     ):
         """导出为 ChatLab JSONL 格式（流式写入）"""
         self.ensure_output_dir()
-
-        # 初始化资源目录（为 HTML 导出做准备，但不在 ChatLab JSON 中体现）
-        resources_dir = self.output_path.parent / 'resources'
-        resources_dir.mkdir(exist_ok=True)
-        for subdir in ['images', 'videos', 'audios', 'files']:
-            (resources_dir / subdir).mkdir(exist_ok=True)
 
         # 构建成员映射
         member_map = {m.platform_id: m for m in members}
@@ -65,7 +58,7 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
 
             # 3. 流式写入 message 行
             for msg in messages:
-                message_data = self._build_single_message(msg, member_map, resources_dir)
+                message_data = self._build_single_message(msg, member_map)
                 message_line = {
                     "_type": "message",
                     **message_data
@@ -79,7 +72,6 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
         self,
         msg: ParsedMessage,
         member_map: dict[str, ParsedMember],
-        resources_dir: Path
     ) -> dict[str, Any]:
         """构建单条消息数据（用于流式写入）"""
         message_data = {
@@ -100,8 +92,5 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
             group_nickname = msg.sender_card or msg.sender_nickname
             if group_nickname:
                 message_data["groupNickname"] = group_nickname
-
-        # 落地图片资源（不在 ChatLab JSON 中体现，为 HTML 导出做准备）
-        self._copy_image_resources(msg.elements, resources_dir)
 
         return message_data
