@@ -15,6 +15,7 @@ class BaseExporter(ABC):
     """导出器基类"""
 
     streams_messages = False
+    supports_incremental_messages = False
 
     def __init__(self, output_path: Path, config: dict[str, Any]):
         """初始化导出器
@@ -50,3 +51,19 @@ class BaseExporter(ABC):
     def ensure_output_dir(self):
         """确保输出目录存在"""
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def start_stream(
+        self,
+        meta: dict[str, Any],
+        members: list[ParsedMember],
+    ) -> None:
+        raise NotImplementedError
+
+    def write_message(self, message: ParsedMessage) -> None:
+        raise NotImplementedError
+
+    def finish_stream(self) -> None:
+        raise NotImplementedError
+
+    def abort_stream(self) -> None:
+        pass

@@ -20,10 +20,12 @@ class HTMLExporter(BaseExporter):
     """HTML 格式导出器（单文件，所有资源内联或相对路径）"""
 
     streams_messages = True
+    supports_incremental_messages = True
 
     def __init__(self, output_path: Path, config: dict[str, Any]):
         super().__init__(output_path, config)
         self._image_resource_map: dict[str, str] = {}
+        self._stream_state: dict[str, Any] | None = None
 
     def export(
         self,
@@ -104,6 +106,22 @@ class HTMLExporter(BaseExporter):
         messages: Iterable[ParsedMessage],
     ) -> None:
         """逐条写出 HTML，避免大规模会话同时常驻内存。"""
+        self.start_stream(meta, members)
+        try:
+            for message in messages:
+                self.write_message(message)
+        except Exception:
+            self.abort_stream()
+            raise
+        else:
+            self.finish_stream()
+
+    def start_stream(
+        self,
+        meta: dict[str, Any],
+        members: list[ParsedMember],
+    ) -> None:
+        self.ensure_output_dir()
         member_map = {member.platform_id: member for member in members}
         owner_id = meta.get('ownerId', '')
         avatar_map = self._build_avatar_map(members)
@@ -120,55 +138,76 @@ class HTMLExporter(BaseExporter):
             sender_options='',
         )
         prefix, suffix = template.split(marker, 1)
+        output = open(self.output_path, 'w', encoding='utf-8')
+        self._stream_state = {
+            'output': output,
+            'suffix': suffix,
+            'member_map': member_map,
+            'owner_id': owner_id,
+            'avatar_map': avatar_map,
+            'message_count': 0,
+            'sender_uids': set(),
+            'date_counts': {},
+            'first_date': None,
+            'last_date': None,
+            'current_date': None,
+        }
+        output.write(prefix)
 
-        message_count = 0
-        sender_uids: set[str] = set()
-        date_counts: dict[str, int] = {}
-        first_date = None
-        last_date = None
-        current_date = None
-
-        with open(self.output_path, 'w', encoding='utf-8') as output:
-            output.write(prefix)
-            for message in messages:
-                self._prepare_message_resources(message)
-                date_str = datetime.fromtimestamp(message.timestamp).strftime('%Y-%m-%d')
-                date_id = date_str.replace(' ', '-').replace('/', '-')
-                if date_str != current_date:
-                    if current_date is not None:
-                        output.write('</div></section>')
-                    output.write(
-                        f'<section class="date-block" id="date-{date_id}" data-date="{date_id}">'
-                        f'<div class="date-divider"><span>{date_str}</span>'
-                        f'<small data-date-count="{date_id}">0 条</small></div>'
-                        '<div class="messages">'
-                    )
-                    current_date = date_str
-                output.write(self._render_message(
-                    message, member_map, owner_id, avatar_map, {}
-                ))
-                message_count += 1
-                sender_uids.add(message.sender_uid)
-                date_counts[date_str] = date_counts.get(date_str, 0) + 1
-                first_date = first_date or date_str
-                last_date = date_str
-
-            if current_date is not None:
+    def write_message(self, message: ParsedMessage) -> None:
+        state = self._stream_state
+        if state is None:
+            raise RuntimeError('HTML stream is not open')
+        output = state['output']
+        self._prepare_message_resources(message)
+        date_str = datetime.fromtimestamp(message.timestamp).strftime('%Y-%m-%d')
+        date_id = date_str.replace(' ', '-').replace('/', '-')
+        if date_str != state['current_date']:
+            if state['current_date'] is not None:
                 output.write('</div></section>')
+            output.write(
+                f'<section class="date-block" id="date-{date_id}" data-date="{date_id}">'
+                f'<div class="date-divider"><span>{date_str}</span>'
+                f'<small data-date-count="{date_id}">0 条</small></div>'
+                '<div class="messages">'
+            )
+            state['current_date'] = date_str
+        output.write(self._render_message(
+            message,
+            state['member_map'],
+            state['owner_id'],
+            state['avatar_map'],
+            {},
+        ))
+        state['message_count'] += 1
+        state['sender_uids'].add(message.sender_uid)
+        state['date_counts'][date_str] = state['date_counts'].get(date_str, 0) + 1
+        state['first_date'] = state['first_date'] or date_str
+        state['last_date'] = date_str
 
+    def finish_stream(self) -> None:
+        state = self._stream_state
+        if state is None:
+            return
+        output = state['output']
+        try:
+            if state['current_date'] is not None:
+                output.write('</div></section>')
             sender_options = []
             for uid in sorted(
-                sender_uids,
+                state['sender_uids'],
                 key=lambda item: (
-                    member_map[item].get_display_name()
-                    if member_map.get(item) else item
+                    state['member_map'][item].get_display_name()
+                    if state['member_map'].get(item) else item
                 ),
             ):
-                member = member_map.get(uid)
+                member = state['member_map'].get(uid)
                 sender_options.append({
                     'uid': uid,
                     'name': member.get_display_name() if member else uid,
                 })
+            first_date = state['first_date']
+            last_date = state['last_date']
             date_range = '无消息'
             if first_date:
                 date_range = (
@@ -176,16 +215,25 @@ class HTMLExporter(BaseExporter):
                     else f'{first_date} 至 {last_date}'
                 )
             metadata = json.dumps({
-                'messageCount': message_count,
-                'memberCount': len(sender_uids),
+                'messageCount': state['message_count'],
+                'memberCount': len(state['sender_uids']),
                 'dateRange': date_range,
-                'dateCounts': date_counts,
+                'dateCounts': state['date_counts'],
                 'senders': sender_options,
             }, ensure_ascii=False).replace('</', '<\\/')
             output.write(
                 f'<script>window.__QQNT_EXPORT_META__={metadata};</script>'
             )
-            output.write(suffix)
+            output.write(state['suffix'])
+        finally:
+            output.close()
+            self._stream_state = None
+
+    def abort_stream(self) -> None:
+        state = self._stream_state
+        if state is not None:
+            state['output'].close()
+            self._stream_state = None
 
     def get_file_extension(self) -> str:
         return '.html'

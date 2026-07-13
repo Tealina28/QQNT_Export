@@ -109,16 +109,50 @@ def export_query(
     batch_size = max(1, int(config.get(
         'stream_batch_size', DEFAULT_STREAM_BATCH_SIZE
     )))
-    materialized_messages = None
-    for exporter, output_path in exporters:
-        if exporter.streams_messages:
-            messages = iter_parsed_messages(query, parse_message, batch_size)
-        else:
-            if materialized_messages is None:
-                materialized_messages = list(iter_parsed_messages(
-                    query, parse_message, batch_size
-                ))
-            messages = materialized_messages
+    incremental_exporters = [
+        (exporter, output_path)
+        for exporter, output_path in exporters
+        if exporter.streams_messages
+        and getattr(exporter, 'supports_incremental_messages', False)
+    ]
+    buffered_exporters = [
+        (exporter, output_path)
+        for exporter, output_path in exporters
+        if not exporter.streams_messages
+    ]
+    legacy_streaming_exporters = [
+        (exporter, output_path)
+        for exporter, output_path in exporters
+        if exporter.streams_messages
+        and not getattr(exporter, 'supports_incremental_messages', False)
+    ]
+
+    materialized_messages = [] if buffered_exporters else None
+    started_exporters = []
+    try:
+        for exporter, _ in incremental_exporters:
+            started_exporters.append(exporter)
+            exporter.start_stream(meta, members)
+        if incremental_exporters or buffered_exporters:
+            for message in iter_parsed_messages(query, parse_message, batch_size):
+                for exporter, _ in incremental_exporters:
+                    exporter.write_message(message)
+                if materialized_messages is not None:
+                    materialized_messages.append(message)
+        for exporter, output_path in incremental_exporters:
+            exporter.finish_stream()
+            logging.info(f"  导出完成: {output_path.name}")
+    except Exception:
+        for exporter in started_exporters:
+            exporter.abort_stream()
+        raise
+
+    for exporter, output_path in buffered_exporters:
+        exporter.export(meta, members, materialized_messages)
+        logging.info(f"  导出完成: {output_path.name}")
+
+    for exporter, output_path in legacy_streaming_exporters:
+        messages = iter_parsed_messages(query, parse_message, batch_size)
         exporter.export(meta, members, messages)
         logging.info(f"  导出完成: {output_path.name}")
 

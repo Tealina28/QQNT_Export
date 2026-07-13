@@ -21,6 +21,12 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
     """
 
     streams_messages = True
+    supports_incremental_messages = True
+
+    def __init__(self, output_path, config):
+        super().__init__(output_path, config)
+        self._stream = None
+        self._stream_member_map: dict[str, ParsedMember] = {}
 
     def export(
         self,
@@ -29,41 +35,54 @@ class ChatLabJSONLExporter(ChatLabJSONExporter):
         messages: Iterable[ParsedMessage]
     ):
         """导出为 ChatLab JSONL 格式（流式写入）"""
-        self.ensure_output_dir()
-
-        # 构建成员映射
-        member_map = {m.platform_id: m for m in members}
-
-        with open(self.output_path, 'w', encoding='utf-8') as f:
-            # 1. 写入 header 行
-            header = {
-                "_type": "header",
-                "chatlab": {
-                    "version": "0.0.2",
-                    "exportedAt": int(time.time()),
-                    "generator": "QQNT_Export"
-                },
-                "meta": self._build_meta(meta)
-            }
-            f.write(json.dumps(header, ensure_ascii=False) + '\n')
-
-            # 2. 写入 member 行
-            member_data_list = self._build_members(members)
-            for member_data in member_data_list:
-                member_line = {
-                    "_type": "member",
-                    **member_data
-                }
-                f.write(json.dumps(member_line, ensure_ascii=False) + '\n')
-
-            # 3. 流式写入 message 行
+        self.start_stream(meta, members)
+        try:
             for msg in messages:
-                message_data = self._build_single_message(msg, member_map)
-                message_line = {
-                    "_type": "message",
-                    **message_data
-                }
-                f.write(json.dumps(message_line, ensure_ascii=False) + '\n')
+                self.write_message(msg)
+        except Exception:
+            self.abort_stream()
+            raise
+        else:
+            self.finish_stream()
+
+    def start_stream(
+        self,
+        meta: dict[str, Any],
+        members: list[ParsedMember],
+    ) -> None:
+        self.ensure_output_dir()
+        self._stream_member_map = {member.platform_id: member for member in members}
+        self._stream = open(self.output_path, 'w', encoding='utf-8')
+        header = {
+            "_type": "header",
+            "chatlab": {
+                "version": "0.0.2",
+                "exportedAt": int(time.time()),
+                "generator": "QQNT_Export"
+            },
+            "meta": self._build_meta(meta)
+        }
+        self._stream.write(json.dumps(header, ensure_ascii=False) + '\n')
+        for member_data in self._build_members(members):
+            member_line = {"_type": "member", **member_data}
+            self._stream.write(json.dumps(member_line, ensure_ascii=False) + '\n')
+
+    def write_message(self, message: ParsedMessage) -> None:
+        if self._stream is None:
+            raise RuntimeError('JSONL stream is not open')
+        message_line = {
+            "_type": "message",
+            **self._build_single_message(message, self._stream_member_map),
+        }
+        self._stream.write(json.dumps(message_line, ensure_ascii=False) + '\n')
+
+    def finish_stream(self) -> None:
+        if self._stream is not None:
+            self._stream.close()
+            self._stream = None
+
+    def abort_stream(self) -> None:
+        self.finish_stream()
 
     def get_file_extension(self) -> str:
         return '.jsonl'
