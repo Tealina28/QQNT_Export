@@ -133,6 +133,8 @@ class MessageParser:
             ElementParser.parse(element, cached_messages)
             for element in raw_elements.elements
         ]
+        if getattr(msg, 'msg_type', None) == 9 and cached_messages:
+            self._enrich_quote_elements(elements, cached_messages)
         recovery = getattr(msg, '_message_body_recovery', None)
         if recovery:
             elements.append(ParsedElement(
@@ -146,6 +148,39 @@ class MessageParser:
                 },
             ))
         return elements, cached_messages
+
+    @staticmethod
+    def _enrich_quote_elements(
+        elements: list[ParsedElement],
+        cached_messages: list[ParsedMessage],
+    ) -> None:
+        """用 40900 中的完整消息补全引用里的真实媒体元素。"""
+        media_types = {
+            ElementType.IMAGE,
+            ElementType.FILE,
+            ElementType.VOICE,
+            ElementType.VIDEO,
+            ElementType.MARKET_FACE,
+            ElementType.ONLINE_FILE,
+        }
+        cached = next(
+            (
+                message for message in cached_messages
+                if any(element.type in media_types for element in message.elements)
+            ),
+            None,
+        )
+        if not cached:
+            return
+
+        for element in elements:
+            if element.type != ElementType.QUOTE:
+                continue
+            quoted = element.content.get('quoted_elements', [])
+            if any(item.type in media_types for item in quoted):
+                continue
+            element.content['quoted_elements'] = cached.elements
+            element.content['quote_cache_enriched'] = True
 
     @staticmethod
     def _resolve_quote_reference(
