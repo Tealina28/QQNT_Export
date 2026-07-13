@@ -467,6 +467,8 @@ class HTMLExporter(BaseExporter):
                 if fwd_msgs:
                     fwd_html = self._render_forward_messages(fwd_msgs, member_map)
                     parts.append(fwd_html)
+                elif elem.type == ElementType.APPLICATION:
+                    parts.append(self._render_application_card(elem.content))
                 else:
                     parts.append('<div class="placeholder-card">应用消息</div>')
 
@@ -568,6 +570,40 @@ class HTMLExporter(BaseExporter):
                 f'{html.escape(str(label))} {reaction.count}</span>'
             )
         return f'<div class="reactions">{"".join(items)}</div>'
+
+    @staticmethod
+    def _render_application_card(content: dict) -> str:
+        kind = content.get('card_kind') or 'share'
+        title = html.escape(content.get('title') or content.get('prompt') or '应用消息')
+        description = html.escape(content.get('description') or '')
+        footer = html.escape(content.get('footer') or '')
+        image_url = content.get('image_url') or ''
+        target_url = content.get('target_url') or ''
+
+        labels = {
+            'announcement': '群公告',
+            'location': '位置',
+            'contact': '名片',
+            'music': '音乐分享',
+            'miniapp': 'QQ 小程序',
+            'share': '分享卡片',
+        }
+        label = labels.get(kind, '应用消息')
+        image = ''
+        if image_url:
+            safe_image = html.escape(image_url, quote=True)
+            image = f'<img class="ark-image" src="{safe_image}" alt="" loading="lazy">'
+        body = (
+            f'<div class="ark-label">{html.escape(label)}</div>'
+            f'<strong>{title}</strong>'
+            f'{f"<span>{description}</span>" if description else ""}'
+            f'{image}'
+            f'{f"<small>{footer}</small>" if footer else ""}'
+        )
+        if target_url.startswith(('http://', 'https://')):
+            safe_url = html.escape(target_url, quote=True)
+            return f'<a class="ark-card ark-{kind}" href="{safe_url}" target="_blank" rel="noreferrer">{body}</a>'
+        return f'<div class="ark-card ark-{kind}">{body}</div>'
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
@@ -1726,7 +1762,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 10px;
             object-fit: contain;
         }}
-        .attachment-card, .media-chip, .wallet-card, .feed-card,
+        .attachment-card, .media-chip, .wallet-card, .feed-card, .ark-card,
         .placeholder-card {{ margin: 3px 0; }}
         .attachment-card {{
             display: grid;
@@ -1778,6 +1814,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: #fff;
         }}
         .wallet-card span {{ font-size: 12px; opacity: .88; }}
+        .ark-card {{
+            display: grid;
+            min-width: 230px;
+            max-width: 360px;
+            gap: 6px;
+            padding: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: rgba(127, 127, 127, .07);
+            color: inherit;
+            text-decoration: none;
+        }}
+        .ark-card:hover {{ border-color: var(--accent); }}
+        .ark-card strong {{ font-size: 14px; line-height: 1.4; }}
+        .ark-card span, .ark-card small {{
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }}
+        .ark-label {{
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 700;
+        }}
+        .ark-image {{
+            width: 100%;
+            max-height: 180px;
+            border-radius: 7px;
+            object-fit: cover;
+        }}
+        .ark-announcement {{ border-left: 3px solid var(--accent); }}
         .feed-card, .placeholder-card {{
             padding: 10px 11px;
             border: 1px solid var(--border);

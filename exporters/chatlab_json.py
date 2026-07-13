@@ -203,6 +203,14 @@ class ChatLabJSONExporter(BaseExporter):
                 and element.content.get('flash_transfer')
             ):
                 return 4  # FILE
+            elif element.type == ElementType.APPLICATION:
+                card_kind = element.content.get('card_kind')
+                if card_kind == 'location':
+                    return 8  # LOCATION
+                if card_kind == 'contact':
+                    return 27  # CONTACT
+                if card_kind == 'announcement':
+                    return 80  # SYSTEM
 
         # ChatLab 类型映射
         type_mapping = {
@@ -433,40 +441,19 @@ class ChatLabJSONExporter(BaseExporter):
 
     def _format_application(self, c: dict[str, Any]) -> str:
         """格式化 Ark 卡片消息，按 app 类型路由（音乐/位置/合并转发/名片等）"""
-        import json as _json
+        kind = c.get('card_kind')
+        title = c.get('title') or c.get('prompt') or ''
+        description = c.get('description') or ''
+        detail = f"{title}{(' | ' + description) if description else ''}".strip()
 
-        raw = c.get('raw')
-        if not raw:
-            return "[应用消息]"
-        try:
-            data = _json.loads(raw.decode('utf-8', 'ignore') if isinstance(raw, bytes) else raw)
-        except Exception:
-            return "[应用消息]"
-
-        app = data.get('app', '')
-        prompt = data.get('prompt', '') or ''
-        meta = data.get('meta', {}) or {}
-
-        if app == "com.tencent.map" and data.get('view') == "LocationShare":
-            loc = meta.get('Location.Search', {}) or {}
-            name = loc.get('name') or "未知地点"
-            address = loc.get('address') or ""
-            return f"[位置: {name}{(' | ' + address) if address else ''}]"
-
-        if app == "com.tencent.music.lua" and data.get('view') == "music":
-            music = meta.get('music', {}) or {}
-            title = music.get('title') or ""
-            artist = music.get('desc') or ""
-            return f"[分享] {title}{(' - ' + artist) if artist else ''}".strip()
-
-        if app == "com.tencent.multimsg":
-            detail = meta.get('detail', {}) or {}
-            source = detail.get('source') or "聊天记录"
-            summary = detail.get('summary') or "查看转发"
-            return f"[聊天记录] {source}: {summary}"
-
-        if app == "com.tencent.contact.lua":
-            return f"[名片] {prompt}" if prompt else "[名片]"
-
-        # 兜底：用 prompt 外显，否则标注应用消息
-        return prompt if prompt else "[应用消息]"
+        labels = {
+            'location': '位置',
+            'contact': '名片',
+            'announcement': '群公告',
+            'music': '音乐',
+            'miniapp': '小程序',
+            'forward': '聊天记录',
+            'share': '分享',
+        }
+        label = labels.get(kind, '应用消息')
+        return f"[{label}: {detail}]" if detail else f"[{label}]"

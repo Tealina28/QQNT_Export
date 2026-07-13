@@ -5,6 +5,8 @@ Element 解析器
 """
 
 from functools import lru_cache
+import base64
+import json
 from pathlib import Path
 from typing import Callable, Optional
 import logging
@@ -391,9 +393,15 @@ def parse_application(
         element: protobuf Element 对象
         forward_messages: 已解析的 40900 子消息（兼容旧版 Ark 转发卡片）
     """
-    content = {
-        'raw': element.applicationMessage,
-    }
+    raw = element.applicationMessage
+    content = {'raw': raw}
+    try:
+        ark_data = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        ark_data = None
+
+    if isinstance(ark_data, dict):
+        content.update(_parse_ark_data(ark_data))
 
     if forward_messages:
         content['forward_messages'] = forward_messages
@@ -402,6 +410,79 @@ def parse_application(
         type=ElementType.APPLICATION,
         content=content
     )
+
+
+def _parse_ark_data(data: dict) -> dict:
+    """把 Ark JSON 归一化为导出层可直接消费的卡片字段。"""
+    app = str(data.get('app') or '')
+    view = str(data.get('view') or '')
+    prompt = str(data.get('prompt') or '')
+    meta = data.get('meta') if isinstance(data.get('meta'), dict) else {}
+    payload_key = next(iter(meta), '')
+    payload = meta.get(payload_key, {}) if payload_key else {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    def value(*keys: str) -> str:
+        for key in keys:
+            item = payload.get(key)
+            if item is not None and str(item).strip():
+                return str(item)
+        return ''
+
+    card_kind = 'share'
+    title = value('title', 'summary', 'nickname', 'name') or prompt
+    description = value('desc', 'description', 'contact', 'address', 'text')
+    footer = value('tag', 'source', 'appName')
+    image_url = value('preview', 'cover', 'avatar', 'image')
+    icon_url = value('icon', 'tagIcon')
+    target_url = value('jumpUrl', 'qqdocurl', 'url')
+
+    if app == 'com.tencent.multimsg':
+        card_kind = 'forward'
+    elif app == 'com.tencent.map' and view == 'LocationShare':
+        card_kind = 'location'
+        title = value('name', 'title') or prompt or '未知地点'
+        description = value('address', 'desc')
+    elif app in ('com.tencent.contact.lua', 'com.tencent.troopsharecard'):
+        card_kind = 'contact'
+        title = value('nickname', 'title', 'name') or prompt or '联系人名片'
+        description = value('contact', 'desc', 'summary')
+    elif app == 'com.tencent.mannounce':
+        card_kind = 'announcement'
+        encoded = payload.get('encode') in (1, '1')
+        title = _decode_ark_text(value('title'), encoded) or '群公告'
+        description = _decode_ark_text(value('text', 'desc'), encoded)
+    elif app in ('com.tencent.music.lua', 'com.tencent.structmsg') and view == 'music':
+        card_kind = 'music'
+    elif 'miniapp' in app or view == 'miniapp':
+        card_kind = 'miniapp'
+        title = value('desc', 'title') or prompt
+        description = value('summary', 'desc')
+
+    return {
+        'ark_data': data,
+        'app': app,
+        'view': view,
+        'prompt': prompt,
+        'payload_key': payload_key,
+        'card_kind': card_kind,
+        'title': title,
+        'description': description,
+        'footer': footer,
+        'image_url': image_url,
+        'icon_url': icon_url,
+        'target_url': target_url,
+    }
+
+
+def _decode_ark_text(value: str, encoded: bool) -> str:
+    if not encoded or not value:
+        return value
+    try:
+        return base64.b64decode(value).decode('utf-8')
+    except (ValueError, UnicodeDecodeError):
+        return value
 
 
 @ElementParser.register(11)
