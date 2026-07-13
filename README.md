@@ -12,13 +12,15 @@
 - **插件化导出器**：轻松添加新的导出格式
 - **可扩展解析器**：注册机制添加新的消息元素类型
 - **导出进度条**：基于 tqdm 实时显示导出进度
-- **流式处理**：JSONL 格式支持超大规模数据导出
+- **流式处理**：JSONL 与 HTML 支持超大规模数据导出，HTML 按日期分块渲染
+- **离线头像**：ChatLab 输出成员/群头像，HTML 可复制 QQ NT 本地头像缓存
 - **跨设备消息**：导出 `dataline_msg_table` 中“我的手机/电脑/平板”同步记录
 
 ## 📦 导出格式
 
 - **chatlab_json**：ChatLab JSON 格式（适合 <100万条消息）
 - **chatlab_jsonl**：ChatLab JSONL 流式格式（适合 >100万条消息）
+- **html**：可搜索、按发送者/日期筛选的流式 HTML 聊天记录
 
 ## 🚀 快速开始
 
@@ -64,9 +66,12 @@ group_filters = []        # 群聊过滤（群号列表，空=全部）
 conversation_types = ["c2c", "group", "dataline"]
 dataline_owner = "pc"    # 数据线中的本机设备：pc、phone 或 pad
 
-# 导出格式：chatlab_json 和/或 chatlab_jsonl
-output_format = ["chatlab_json", "chatlab_jsonl"]
-stream_batch_size = 1000 # JSONL 每批读取的消息数
+# 导出格式：chatlab_json、chatlab_jsonl 和/或 html
+output_format = ["chatlab_json", "chatlab_jsonl", "html"]
+stream_batch_size = 1000 # JSONL/HTML 每批读取的消息数
+copy_resources = true   # HTML 复制图片和本地头像
+avatar_path = ""        # 可选：nt_data/avatar 或 nt_data 目录
+embed_avatars = false   # ChatLab 是否嵌入本地头像 Data URL
 ```
 
 导出结果分别写入 `output/c2c/`、`output/group/` 和
@@ -90,7 +95,8 @@ QQNT_Export/
 ├── exporters/            # 导出层（新）
 │   ├── base.py           # 导出器基类
 │   ├── chatlab_json.py   # ChatLab JSON 导出器
-│   └── chatlab_jsonl.py  # ChatLab JSONL 导出器
+│   ├── chatlab_jsonl.py  # ChatLab JSONL 导出器
+│   └── html.py           # 流式 HTML 导出器
 ├── main.py               # 主程序
 ├── example.toml          # 配置示例
 └── README.md             # 本文档

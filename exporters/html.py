@@ -5,7 +5,9 @@ HTML 格式导出器
 """
 
 import html
+import json
 import time
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,14 +19,24 @@ from .base import BaseExporter
 class HTMLExporter(BaseExporter):
     """HTML 格式导出器（单文件，所有资源内联或相对路径）"""
 
+    streams_messages = True
+
+    def __init__(self, output_path: Path, config: dict[str, Any]):
+        super().__init__(output_path, config)
+        self._image_resource_map: dict[str, str] = {}
+
     def export(
         self,
         meta: dict[str, Any],
         members: list[ParsedMember],
-        messages: list[ParsedMessage]
+        messages: Iterable[ParsedMessage]
     ):
         """导出为 HTML 格式"""
         self.ensure_output_dir()
+
+        if not isinstance(messages, list):
+            self._export_streaming(meta, members, messages)
+            return
 
         # 如果需要复制资源，先创建资源目录并复制图片
         copy_resources = self.config.get('copy_resources', True)
@@ -85,14 +97,101 @@ class HTMLExporter(BaseExporter):
         with open(self.output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
 
+    def _export_streaming(
+        self,
+        meta: dict[str, Any],
+        members: list[ParsedMember],
+        messages: Iterable[ParsedMessage],
+    ) -> None:
+        """逐条写出 HTML，避免大规模会话同时常驻内存。"""
+        member_map = {member.platform_id: member for member in members}
+        owner_id = meta.get('ownerId', '')
+        avatar_map = self._build_avatar_map(members)
+        marker = '__QQNT_STREAMED_DATE_BLOCKS__'
+        template = HTML_TEMPLATE.format(
+            chat_name=html.escape(meta.get('name', '聊天记录')),
+            chat_type='群聊' if meta.get('type') == 'group' else '私聊',
+            export_time=datetime.fromtimestamp(int(time.time())).strftime('%Y-%m-%d %H:%M'),
+            message_count=0,
+            member_count=0,
+            date_range='统计中',
+            date_blocks=marker,
+            timeline_items='',
+            sender_options='',
+        )
+        prefix, suffix = template.split(marker, 1)
+
+        message_count = 0
+        sender_uids: set[str] = set()
+        date_counts: dict[str, int] = {}
+        first_date = None
+        last_date = None
+        current_date = None
+
+        with open(self.output_path, 'w', encoding='utf-8') as output:
+            output.write(prefix)
+            for message in messages:
+                self._prepare_message_resources(message)
+                date_str = datetime.fromtimestamp(message.timestamp).strftime('%Y-%m-%d')
+                date_id = date_str.replace(' ', '-').replace('/', '-')
+                if date_str != current_date:
+                    if current_date is not None:
+                        output.write('</div></section>')
+                    output.write(
+                        f'<section class="date-block" id="date-{date_id}" data-date="{date_id}">'
+                        f'<div class="date-divider"><span>{date_str}</span>'
+                        f'<small data-date-count="{date_id}">0 条</small></div>'
+                        '<div class="messages">'
+                    )
+                    current_date = date_str
+                output.write(self._render_message(
+                    message, member_map, owner_id, avatar_map, {}
+                ))
+                message_count += 1
+                sender_uids.add(message.sender_uid)
+                date_counts[date_str] = date_counts.get(date_str, 0) + 1
+                first_date = first_date or date_str
+                last_date = date_str
+
+            if current_date is not None:
+                output.write('</div></section>')
+
+            sender_options = []
+            for uid in sorted(
+                sender_uids,
+                key=lambda item: (
+                    member_map[item].get_display_name()
+                    if member_map.get(item) else item
+                ),
+            ):
+                member = member_map.get(uid)
+                sender_options.append({
+                    'uid': uid,
+                    'name': member.get_display_name() if member else uid,
+                })
+            date_range = '无消息'
+            if first_date:
+                date_range = (
+                    first_date if first_date == last_date
+                    else f'{first_date} 至 {last_date}'
+                )
+            metadata = json.dumps({
+                'messageCount': message_count,
+                'memberCount': len(sender_uids),
+                'dateRange': date_range,
+                'dateCounts': date_counts,
+                'senders': sender_options,
+            }, ensure_ascii=False).replace('</', '<\\/')
+            output.write(
+                f'<script>window.__QQNT_EXPORT_META__={metadata};</script>'
+            )
+            output.write(suffix)
+
     def get_file_extension(self) -> str:
         return '.html'
 
     def _prepare_resources(self, messages: list[ParsedMessage]):
         """准备资源文件（复制图片到 resources 目录）"""
-        import shutil
-        from parser.elements import compute_image_cache_path
-
         # 创建资源目录
         resources_dir = self.output_path.parent / 'resources'
         resources_dir.mkdir(exist_ok=True)
@@ -110,23 +209,64 @@ class HTMLExporter(BaseExporter):
 
         # 遍历所有消息，复制图片
         for msg in messages:
-            for elem in msg.elements:
+            for elem in self._iter_resource_elements(msg.elements):
                 if elem.type == ElementType.IMAGE:
-                    md5 = elem.content.get('md5')
-                    original = elem.content.get('original', 0)
-                    if md5:
-                        src_path = compute_image_cache_path(md5, original, pic_path_obj)
-                        if src_path:
-                            ext = src_path.suffix or '.jpg'
-                            dst_filename = f"{md5}{ext}"
-                            dst_path = images_dir / dst_filename
+                    self._copy_image_resource(elem.content, pic_path_obj, images_dir)
 
-                            # 复制文件（去重：已存在则跳过）
-                            if not dst_path.exists():
-                                try:
-                                    shutil.copy2(src_path, dst_path)
-                                except Exception:
-                                    pass  # 静默失败
+    def _prepare_message_resources(self, message: ParsedMessage) -> None:
+        if not self.config.get('copy_resources', True):
+            return
+        pic_path = self.config.get('pic_path')
+        if not pic_path:
+            return
+        pic_path_obj = Path(pic_path)
+        if not pic_path_obj.exists():
+            return
+        images_dir = self.output_path.parent / 'resources' / 'images'
+        images_dir.mkdir(parents=True, exist_ok=True)
+        for element in self._iter_resource_elements(message.elements):
+            if element.type == ElementType.IMAGE:
+                self._copy_image_resource(
+                    element.content, pic_path_obj, images_dir
+                )
+
+    def _copy_image_resource(
+        self,
+        content: dict,
+        pic_path: Path,
+        images_dir: Path,
+    ) -> None:
+        import shutil
+        from parser.elements import compute_image_cache_path
+
+        md5 = content.get('md5')
+        if not md5 or md5 in self._image_resource_map:
+            return
+        source = compute_image_cache_path(
+            md5, content.get('original', 0), pic_path
+        )
+        if not source:
+            return
+        destination = images_dir / f"{md5}{source.suffix or '.jpg'}"
+        try:
+            if not destination.exists():
+                shutil.copy2(source, destination)
+            self._image_resource_map[md5] = (
+                f'resources/images/{destination.name}'
+            )
+        except OSError:
+            return
+
+    def _iter_resource_elements(self, elements: list):
+        """递归遍历正文、引用缓存和合并转发中的资源元素。"""
+        for element in elements:
+            yield element
+            if element.type == ElementType.QUOTE:
+                yield from self._iter_resource_elements(
+                    element.content.get('quoted_elements', [])
+                )
+            for message in element.content.get('forward_messages', []):
+                yield from self._iter_resource_elements(message.elements)
 
     def _build_avatar_map(self, members: list[ParsedMember]) -> dict[str, str]:
         """构建头像映射，优先使用本地缓存并回退成员头像 URL。"""
@@ -364,26 +504,39 @@ class HTMLExporter(BaseExporter):
                 quoted_sender_name = quoted_sender.get_display_name() if quoted_sender else quoted_msg.sender_uid
 
                 # 获取被引用消息的内容（简化版，只取文本）
-                quoted_content = self._extract_text_content(quoted_msg.elements)
-                if len(quoted_content) > 50:
-                    quoted_content = quoted_content[:50] + '...'
+                quoted_content = self._render_quote_preview(quoted_msg.elements)
 
                 quoted_html = f'''
 <button type="button" class="quote quote-link" data-target-message-id="{html.escape(quoted_msg.msg_id, quote=True)}" title="跳转到被引用的消息">
     <div class="quote-sender">{html.escape(quoted_sender_name)}</div>
-    <div class="quote-content">{html.escape(quoted_content)}</div>
+    <div class="quote-content">{quoted_content}</div>
     <span class="quote-jump" aria-hidden="true">↗</span>
 </button>
             '''
             else:
                 embedded = quote_content.get('quoted_elements', [])
-                preview = self._extract_text_content(embedded) if embedded else ''
-                preview = preview[:50] + ('...' if len(preview) > 50 else '')
-                preview = preview or '引用了一条消息'
+                preview = self._render_quote_preview(embedded)
+                quoted_sender = member_map.get(quote_content.get('sender_uid', ''))
+                quoted_sender_name = (
+                    quoted_sender.get_display_name() if quoted_sender else ''
+                )
+                sender_html = (
+                    f'<div class="quote-sender">{html.escape(quoted_sender_name)}</div>'
+                    if quoted_sender_name else ''
+                )
+                target_attr = ''
+                target_class = 'quote'
+                if msg.quoted_msg_id:
+                    target_attr = (
+                        f' data-target-message-id="{html.escape(msg.quoted_msg_id, quote=True)}"'
+                        ' title="跳转到被引用的消息"'
+                    )
+                    target_class += ' quote-link'
                 quoted_html = f'''
-<div class="quote">
-    <div class="quote-content">{html.escape(preview)}</div>
-</div>
+<button type="button" class="{target_class}"{target_attr}>
+    {sender_html}
+    <div class="quote-content">{preview}</div>
+</button>
             '''
 
         search_text = ' '.join((
@@ -618,32 +771,31 @@ class HTMLExporter(BaseExporter):
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
+        image_source = self._resolve_image_source(content)
+        if not image_source:
+            return '<div class="text">[图片]</div>'
+        path_attr = html.escape(image_source, quote=True)
+        return (
+            f'<button class="image-button" type="button" '
+            f'data-src="{path_attr}" '
+            f'onclick="showImage(this.dataset.src)">'
+            f'<img src="{path_attr}" class="message-image" '
+            f'alt="图片" loading="lazy"></button>'
+        )
+
+    def _resolve_image_source(self, content: dict) -> str | None:
+        """返回图片相对路径，不生成可交互 HTML。"""
         from parser.elements import compute_image_cache_path
 
         md5 = content.get('md5')
         if not md5:
-            return '<div class="text">[图片]</div>'
+            return None
 
         # 检查是否复制资源
         copy_resources = self.config.get('copy_resources', True)
 
         if copy_resources:
-            # 模式 1：使用已复制到 resources/images/ 的图片
-            resources_dir = self.output_path.parent / 'resources' / 'images'
-            if resources_dir.exists():
-                # 尝试找到对应的图片文件
-                for img_file in resources_dir.iterdir():
-                    if img_file.stem == md5:
-                        # 相对路径（相对于 HTML 文件）
-                        rel_path = f"resources/images/{img_file.name}"
-                        path_attr = html.escape(rel_path, quote=True)
-                        return (
-                            f'<button class="image-button" type="button" '
-                            f'data-src="{path_attr}" '
-                            f'onclick="showImage(this.dataset.src)">'
-                            f'<img src="{path_attr}" class="message-image" '
-                            f'alt="图片" loading="lazy"></button>'
-                        )
+            return self._image_resource_map.get(md5)
         else:
             # 模式 2：直接指向原始 pic_path 目录（使用相对路径）
             pic_path = self.config.get('pic_path')
@@ -661,20 +813,11 @@ class HTMLExporter(BaseExporter):
                         html_file = self.output_path.absolute()
                         img_file = src_path.absolute()
                         rel_path = os.path.relpath(img_file, html_file.parent)
-                        rel_path_str = rel_path.replace('\\', '/')
-                        path_attr = html.escape(rel_path_str, quote=True)
-                        return (
-                            f'<button class="image-button" type="button" '
-                            f'data-src="{path_attr}" '
-                            f'onclick="showImage(this.dataset.src)">'
-                            f'<img src="{path_attr}" class="message-image" '
-                            f'alt="图片" loading="lazy"></button>'
-                        )
-                    except Exception:
-                        # 失败时显示占位符
-                        return '<div class="text">[图片]</div>'
+                        return rel_path.replace('\\', '/')
+                    except (OSError, ValueError):
+                        return None
 
-        return '<div class="text">[图片]</div>'
+        return None
 
     def _render_forward_messages(
         self,
@@ -780,6 +923,36 @@ class HTMLExporter(BaseExporter):
                 if labels:
                     parts.append(f"[按钮: {' | '.join(labels)}]")
         return ''.join(parts) or '[消息]'
+
+    def _render_quote_preview(self, elements: list) -> str:
+        """渲染引用框预览，优先展示 40900 补全出的真实媒体。"""
+        for element in elements:
+            if element.type == ElementType.QUOTE:
+                continue
+            if element.type == ElementType.IMAGE:
+                image_source = self._resolve_image_source(element.content)
+                if image_source:
+                    source = html.escape(image_source, quote=True)
+                    return (
+                        '<div class="quote-media">'
+                        f'<img src="{source}" class="message-image" '
+                        'alt="引用图片" loading="lazy"></div>'
+                    )
+                return '<span class="quote-media-label">[图片]</span>'
+            if element.type == ElementType.VIDEO:
+                return '<span class="quote-media-label">[视频]</span>'
+            if element.type == ElementType.VOICE:
+                return '<span class="quote-media-label">[语音]</span>'
+            if element.type in (ElementType.FILE, ElementType.ONLINE_FILE):
+                filename = html.escape(element.content.get('filename') or '')
+                return f'<span class="quote-media-label">[文件] {filename}</span>'
+            if element.type == ElementType.MARKET_FACE:
+                label = html.escape(element.content.get('text') or '[商城表情]')
+                return f'<span class="quote-media-label">{label}</span>'
+
+        preview = self._extract_text_content(elements) if elements else ''
+        preview = preview[:50] + ('...' if len(preview) > 50 else '')
+        return html.escape(preview or '引用了一条消息')
 
     def _format_notice_text(self, content: dict, member_map: dict[str, ParsedMember]) -> str:
         """格式化系统提示文本"""
@@ -1101,6 +1274,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .date-block {{
             margin-bottom: 30px;
             border: none;
+            content-visibility: auto;
+            contain-intrinsic-size: 1px 900px;
         }}
 
         .date-block summary {{
@@ -1281,6 +1456,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .quote-content {{
             opacity: 0.9;
+        }}
+
+        .quote-media .image-button {{
+            width: fit-content;
+            margin: 2px 0 0;
+        }}
+
+        .quote-media .message-image {{
+            max-width: 150px;
+            max-height: 96px;
+            border-radius: 6px;
+        }}
+
+        .quote-media-label {{
+            color: var(--text-secondary);
+            font-size: 12px;
         }}
 
         /* 消息高亮动画 */
@@ -2023,7 +2214,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button id="timelineToggle" class="icon-button" title="打开日期导航" aria-label="打开日期导航">☰</button>
             <div class="brand-copy">
                 <h1>{chat_name}</h1>
-                <p>{chat_type} · {message_count} 条消息</p>
+                <p><span id="chatTypeLabel">{chat_type}</span> · <span id="topMessageCount">{message_count}</span> 条消息</p>
             </div>
         </div>
         <div class="toolbar">
@@ -2058,9 +2249,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="hero-kicker">QQNT EXPORT</div>
                 <h2>{chat_name}</h2>
                 <div class="stats">
-                    <div class="stat"><strong>{message_count}</strong><span>消息</span></div>
-                    <div class="stat"><strong>{member_count}</strong><span>发送者</span></div>
-                    <div class="stat"><strong>{date_range}</strong><span>时间范围</span></div>
+                    <div class="stat"><strong id="heroMessageCount">{message_count}</strong><span>消息</span></div>
+                    <div class="stat"><strong id="heroMemberCount">{member_count}</strong><span>发送者</span></div>
+                    <div class="stat"><strong id="heroDateRange">{date_range}</strong><span>时间范围</span></div>
                     <div class="stat"><strong>{export_time}</strong><span>导出时间</span></div>
                 </div>
             </section>
@@ -2091,6 +2282,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const filterSummary = document.getElementById('filterSummary');
         const filterSummaryText = document.getElementById('filterSummaryText');
         const emptyResults = document.getElementById('emptyResults');
+        const exportMeta = window.__QQNT_EXPORT_META__;
+        if (exportMeta) {{
+            document.getElementById('topMessageCount').textContent = exportMeta.messageCount;
+            document.getElementById('heroMessageCount').textContent = exportMeta.messageCount;
+            document.getElementById('heroMemberCount').textContent = exportMeta.memberCount;
+            document.getElementById('heroDateRange').textContent = exportMeta.dateRange;
+            searchStatus.textContent = exportMeta.messageCount + ' 条';
+
+            for (const sender of exportMeta.senders) {{
+                const option = document.createElement('option');
+                option.value = sender.uid;
+                option.textContent = sender.name;
+                senderFilter.appendChild(option);
+            }}
+
+            const timeline = document.querySelector('.timeline-content');
+            for (const [date, count] of Object.entries(exportMeta.dateCounts)) {{
+                const dateId = date.replaceAll(' ', '-').replaceAll('/', '-');
+                const item = document.createElement('button');
+                item.className = 'timeline-item';
+                item.dataset.date = dateId;
+                const dateLabel = document.createElement('div');
+                dateLabel.className = 'date';
+                dateLabel.textContent = date;
+                const countLabel = document.createElement('div');
+                countLabel.className = 'count';
+                countLabel.textContent = count + ' 条消息';
+                item.append(dateLabel, countLabel);
+                item.addEventListener('click', () => scrollToDate(dateId));
+                timeline.appendChild(item);
+                const dividerCount = document.querySelector(
+                    '[data-date-count="' + dateId + '"]'
+                );
+                if (dividerCount) dividerCount.textContent = count + ' 条';
+            }}
+        }}
         const messages = Array.from(document.querySelectorAll('.message-entry'));
         const dateBlocks = Array.from(document.querySelectorAll('.date-block'));
         const dateBlockMap = new Map(dateBlocks.map(block => [block.dataset.date, block]));
