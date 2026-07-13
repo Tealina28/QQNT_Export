@@ -17,6 +17,7 @@ from parser.dataline import (
     dataline_conversation_name,
     resolve_dataline_owner_id,
 )
+from parser.avatar import public_group_avatar_url
 from exporters import EXPORTER_MAP
 
 
@@ -230,6 +231,9 @@ def export_group_conversation(
         'type': 'group',
         'groupId': group_id
     }
+    group_avatar = public_group_avatar_url(group_num)
+    if group_avatar:
+        meta['groupAvatar'] = group_avatar
     if self_member:
         meta['ownerId'] = self_member.platform_id
 

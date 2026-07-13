@@ -19,6 +19,11 @@ stream_batch_size = 1000
 # 是否复制资源文件到导出目录（true=复制到 output/resources/，false=HTML 直接指向 pic_path）
 copy_resources = true
 
+# 可选：QQ NT 的 nt_data/avatar 目录（也可填写 nt_data 目录）
+# 配置后 HTML 会优先复制本地头像；embed_avatars=true 时 ChatLab 会嵌入 Data URL
+avatar_path = ""
+embed_avatars = false
+
 # ============================================================================
 # 媒体资源落地（可选配置，未来扩展）
 # ============================================================================

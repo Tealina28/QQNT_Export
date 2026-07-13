@@ -24,6 +24,7 @@ from .dataline import (
     DATALINE_PHONE_UID,
     dataline_device_name,
 )
+from .avatar import public_user_avatar_url
 from .models import (
     ElementType,
     ParsedElement,
@@ -247,6 +248,7 @@ class MessageParser:
             qq_num=profile.qq_num,
             nickname=profile.nickname or "",
             remark=profile.remark,
+            avatar=profile.avatar_url or public_user_avatar_url(profile.qq_num),
         )
 
     def get_self_member(self) -> Optional[ParsedMember]:
@@ -276,6 +278,10 @@ class MessageParser:
             qq_num=mapping.qq_num,
             nickname=nickname or str(mapping.qq_num),
             remark=remark,
+            avatar=(
+                profile.avatar_url if profile and profile.avatar_url
+                else public_user_avatar_url(mapping.qq_num)
+            ),
         )
         return self._self_member
 
@@ -343,6 +349,7 @@ class MessageParser:
             group_nickname=member.group_name_card,
             is_owner=member.manager_flag == 2,
             is_admin=member.manager_flag == 1,
+            avatar=public_user_avatar_url(member.qq_num),
         )
 
     def get_all_group_members(self, group_num: int) -> list[ParsedMember]:

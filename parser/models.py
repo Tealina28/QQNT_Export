@@ -117,6 +117,7 @@ class ParsedMember:
     group_nickname: Optional[str] = None
     is_owner: bool = False
     is_admin: bool = False
+    avatar: Optional[str] = None
 
     def get_display_name(self) -> str:
         """获取显示名称（优先级：备注 > 群昵称 > 昵称）"""

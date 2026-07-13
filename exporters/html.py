@@ -129,36 +129,43 @@ class HTMLExporter(BaseExporter):
                                     pass  # 静默失败
 
     def _build_avatar_map(self, members: list[ParsedMember]) -> dict[str, str]:
-        """构建头像映射（uid -> avatar_url）
-
-        从数据库查询头像 URL（列 20004），添加参数 s=100
-        """
-        from db import DatabaseManager
+        """构建头像映射，优先使用本地缓存并回退成员头像 URL。"""
+        import os
+        import shutil
+        from parser.avatar import find_local_avatar, image_extension
 
         avatar_map = {}
 
-        # 获取 DatabaseManager 实例（从 config 的 db_path）
-        db_path = self.config.get('db_path')
-        if not db_path:
-            return avatar_map
+        copy_resources = self.config.get('copy_resources', True)
+        avatar_path = self.config.get('avatar_path')
+        avatars_dir = self.output_path.parent / 'resources' / 'avatars'
 
-        try:
-            from pathlib import Path
-            dbman = DatabaseManager(Path(db_path))
-
-            for member in members:
-                profile = dbman.profile_info(member.platform_id)
-                if profile and profile.avatar_url:
-                    # 头像 URL 需要带参数 s=100（缩略图）
-                    avatar_url = profile.avatar_url
-                    if '?' in avatar_url:
-                        avatar_url += '&s=100'
+        for member in members:
+            local = find_local_avatar(
+                avatar_path, member.platform_id, scope='user'
+            )
+            if local:
+                try:
+                    if copy_resources:
+                        avatars_dir.mkdir(parents=True, exist_ok=True)
+                        destination = avatars_dir / (
+                            f'{member.platform_id}{image_extension(local)}'
+                        )
+                        if not destination.exists():
+                            shutil.copy2(local, destination)
+                        avatar_map[member.platform_id] = (
+                            f'resources/avatars/{destination.name}'
+                        )
                     else:
-                        avatar_url += '?s=100'
-                    avatar_map[member.platform_id] = avatar_url
-        except Exception:
-            # 静默失败，不影响导出
-            pass
+                        relative = os.path.relpath(
+                            local.absolute(), self.output_path.parent.absolute()
+                        )
+                        avatar_map[member.platform_id] = relative.replace('\\', '/')
+                    continue
+                except OSError:
+                    pass
+            if member.avatar:
+                avatar_map[member.platform_id] = member.avatar
 
         return avatar_map
 

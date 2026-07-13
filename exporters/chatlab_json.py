@@ -10,6 +10,7 @@ import time
 from typing import Any, Optional
 
 from parser.models import ParsedMessage, ParsedMember, ElementType
+from parser.avatar import find_local_avatar, image_data_url
 from .base import BaseExporter
 
 
@@ -63,6 +64,12 @@ class ChatLabJSONExporter(BaseExporter):
             result['groupId'] = str(meta['groupId'])
         if 'ownerId' in meta:
             result['ownerId'] = str(meta['ownerId'])
+        if meta.get('groupAvatar'):
+            result['groupAvatar'] = self._avatar_value(
+                str(meta.get('groupId') or ''),
+                meta['groupAvatar'],
+                scope='group',
+            )
 
         return result
 
@@ -86,6 +93,13 @@ class ChatLabJSONExporter(BaseExporter):
             # 可选字段
             if member.group_nickname:
                 member_data["groupNickname"] = member.group_nickname
+            avatar = self._avatar_value(
+                member.platform_id,
+                member.avatar,
+                scope='user',
+            )
+            if avatar:
+                member_data['avatar'] = avatar
 
             # 角色
             roles = []
@@ -100,6 +114,23 @@ class ChatLabJSONExporter(BaseExporter):
             result.append(member_data)
 
         return result
+
+    def _avatar_value(
+        self,
+        identity: str,
+        fallback: Optional[str],
+        scope: str,
+    ) -> Optional[str]:
+        if self.config.get('embed_avatars'):
+            local = find_local_avatar(
+                self.config.get('avatar_path'), identity, scope
+            )
+            if local:
+                try:
+                    return image_data_url(local)
+                except OSError:
+                    pass
+        return fallback
 
     def _build_messages(
         self,

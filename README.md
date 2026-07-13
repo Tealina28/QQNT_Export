@@ -83,6 +83,7 @@ QQNT_Export/
 │   └── man.py            # DatabaseManager
 ├── parser/               # 解析层（新）
 │   ├── models.py         # 数据模型
+│   ├── avatar.py         # 头像 URL 与本地缓存解析
 │   ├── dataline.py       # 数据线设备身份
 │   ├── elements.py       # 元素解析器（注册机制）
 │   └── message.py        # 消息解析器
