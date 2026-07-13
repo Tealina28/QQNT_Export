@@ -153,8 +153,9 @@ message Element {
   // 可引用 fileName
   // 可引用 fileSize
   string voiceText =45923;
-  uint32 pttType = 45906; // 1=对讲，2=录音
+  uint32 pttDuration = 45906; // 语音时长，单位为秒
   bool voiceChanged = 45911;
+  bool isAiVoice = 45915; // AI 声聊语音标记
   bytes waveform = 45925;
 
   // 视频

@@ -287,10 +287,14 @@ class ChatLabJSONExporter(BaseExporter):
 
             elif elem.type == ElementType.VOICE:
                 text = elem.content.get('text', '')
+                duration = elem.content.get('duration') or 0
+                prefix = f"语音 {duration}秒" if duration else "语音"
+                if elem.content.get('is_ai_voice'):
+                    prefix = f"AI {prefix}"
                 if text:
-                    parts.append(f"[语音: {text}]")
+                    parts.append(f"[{prefix}: {text}]")
                 else:
-                    parts.append("[语音]")
+                    parts.append(f"[{prefix}]")
 
             elif elem.type == ElementType.VIDEO:
                 filename = elem.content.get('filename', '')

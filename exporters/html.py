@@ -446,9 +446,13 @@ class HTMLExporter(BaseExporter):
 
             elif elem.type == ElementType.VOICE:
                 text = elem.content.get('text')
+                duration = elem.content.get('duration') or 0
+                voice_type = 'AI 语音' if elem.content.get('is_ai_voice') else '语音'
                 label = text or '未转写语音'
+                if duration:
+                    label = f'{label} · {duration}秒'
                 parts.append(
-                    '<div class="media-chip"><span>语音</span>'
+                    f'<div class="media-chip"><span>{voice_type}</span>'
                     f'{html.escape(label)}</div>'
                 )
 

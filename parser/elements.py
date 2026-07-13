@@ -166,8 +166,9 @@ def parse_voice(element) -> ParsedElement:
             'size': element.fileSize,
             'file_path': element.filePath,
             'file_token': element.fileToken,
-            'ptt_type': element.pttType,
+            'duration': element.pttDuration,
             'voice_changed': element.voiceChanged,
+            'is_ai_voice': element.isAiVoice,
             'waveform': element.waveform.hex() if element.waveform else None,
             'text': element.voiceText,
         }
