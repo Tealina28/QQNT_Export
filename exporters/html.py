@@ -1924,6 +1924,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .date-divider small {{ opacity: .75; }}
 
         .messages {{ padding: 0; }}
+        .message-chunk {{ display: flow-root; }}
         .message-entry.hidden {{ display: none; }}
         .message-entry {{
             content-visibility: auto;
@@ -2349,16 +2350,50 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (dividerCount) dividerCount.textContent = count + ' 条';
             }}
         }}
-        const messages = Array.from(document.querySelectorAll('.message-entry'));
         const dateBlocks = Array.from(document.querySelectorAll('.date-block'));
         const dateBlockMap = new Map(dateBlocks.map(block => [block.dataset.date, block]));
-        const messageRecords = messages.map(element => ({{
-            element,
-            search: element.dataset.search,
-            sender: element.dataset.sender,
-            date: element.closest('.date-block').dataset.date
-        }}));
-        const messageRecordMap = new Map(messageRecords.map(record => [record.element.id, record]));
+        const messageRecords = [];
+        const messageRecordMap = new Map();
+        const virtualChunks = [];
+        const virtualChunkMap = new WeakMap();
+        const firstRecordByDate = new Map();
+        const virtualChunkSize = 200;
+        for (const block of dateBlocks) {{
+            const container = block.querySelector('.messages');
+            const entries = Array.from(container.querySelectorAll(':scope > .message-entry'));
+            for (let offset = 0; offset < entries.length; offset += virtualChunkSize) {{
+                const chunkEntries = entries.slice(offset, offset + virtualChunkSize);
+                const chunkElement = document.createElement('div');
+                chunkElement.className = 'message-chunk';
+                container.insertBefore(chunkElement, chunkEntries[0]);
+                const records = chunkEntries.map(element => {{
+                    const record = {{
+                        id: element.id,
+                        html: element.outerHTML,
+                        search: element.dataset.search,
+                        sender: element.dataset.sender,
+                        date: block.dataset.date,
+                        chunk: null
+                    }};
+                    chunkElement.appendChild(element);
+                    messageRecords.push(record);
+                    messageRecordMap.set(record.id, record);
+                    if (!firstRecordByDate.has(record.date)) {{
+                        firstRecordByDate.set(record.date, record);
+                    }}
+                    return record;
+                }});
+                const chunk = {{
+                    element: chunkElement,
+                    height: Math.max(chunkElement.offsetHeight, 1),
+                    loaded: true,
+                    records
+                }};
+                records.forEach(record => {{ record.chunk = chunk; }});
+                virtualChunks.push(chunk);
+                virtualChunkMap.set(chunkElement, chunk);
+            }}
+        }}
         const originalContent = document.createDocumentFragment();
         let matches = messageRecords.slice();
         let renderedMatches = [];
@@ -2399,9 +2434,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.querySelectorAll('.filtered-date-block').forEach(block => block.remove());
         }}
 
+        function loadVirtualChunk(chunk) {{
+            if (chunk.loaded) return;
+            chunk.element.classList.remove('is-virtualized');
+            chunk.element.style.minHeight = '';
+            chunk.element.innerHTML = chunk.records
+                .map(record => record.html).join('');
+            chunk.loaded = true;
+        }}
+
+        function unloadVirtualChunk(chunk) {{
+            if (!chunk.loaded || filterActive) return;
+            chunk.height = Math.max(chunk.element.offsetHeight, chunk.height, 1);
+            chunk.element.replaceChildren();
+            chunk.element.style.minHeight = chunk.height + 'px';
+            chunk.element.classList.add('is-virtualized');
+            chunk.loaded = false;
+        }}
+
         function enterFilteredMode() {{
             if (filterActive) return;
             dateObserver.disconnect();
+            virtualObserver.disconnect();
             dateBlocks.forEach(block => originalContent.appendChild(block));
             filterActive = true;
         }}
@@ -2418,6 +2472,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             emptyResults.classList.remove('visible');
             updateTimelineDates(null);
             dateBlocks.forEach(block => dateObserver.observe(block));
+            virtualChunks.forEach(chunk => virtualObserver.observe(chunk.element));
         }}
 
         function renderResults(generation) {{
@@ -2462,7 +2517,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         fragment.appendChild(section);
                         containers.set(record.date, container);
                     }}
-                    container.appendChild(record.element.cloneNode(true));
+                    container.insertAdjacentHTML('beforeend', record.html);
                 }}
 
                 if (cursor < matches.length) {{
@@ -2496,7 +2551,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 searchInProgress = false;
                 leaveFilteredMode();
                 matches = messageRecords.slice();
-                searchStatus.textContent = messages.length + ' 条';
+                searchStatus.textContent = messageRecords.length + ' 条';
                 return;
             }}
 
@@ -2572,12 +2627,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function scrollToMessage(msgId) {{
             const elementId = 'msg-' + msgId;
             let target = document.getElementById(elementId);
-            if (!target && filterActive && messageRecordMap.has(elementId)) {{
+            const record = messageRecordMap.get(elementId);
+            if (!target && filterActive && record) {{
                 searchInput.value = '';
                 senderFilter.value = '';
-                applyFilters();
-                requestAnimationFrame(() => scrollToMessage(msgId));
-                return;
+                leaveFilteredMode();
+            }}
+            if (!target && record) {{
+                loadVirtualChunk(record.chunk);
+                target = document.getElementById(elementId);
             }}
             if (!target) return;
             target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
@@ -2597,6 +2655,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function scrollToDate(dateId) {{
             const target = document.getElementById('date-' + dateId);
             if (!target) return;
+            const firstRecord = firstRecordByDate.get(dateId);
+            if (firstRecord) loadVirtualChunk(firstRecord.chunk);
             target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
             if (matchMedia('(max-width: 860px)').matches) toggleTimeline(false);
         }}
@@ -2611,6 +2671,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}, {{ rootMargin: '-80px 0px -65% 0px', threshold: [0, .1, .5] }});
         dateBlocks.forEach(block => dateObserver.observe(block));
+
+        const virtualObserver = new IntersectionObserver(entries => {{
+            for (const entry of entries) {{
+                const chunk = virtualChunkMap.get(entry.target);
+                if (!chunk) continue;
+                if (entry.isIntersecting) loadVirtualChunk(chunk);
+                else unloadVirtualChunk(chunk);
+            }}
+        }}, {{ rootMargin: '1200px 0px 1200px 0px' }});
+        virtualChunks.forEach(chunk => virtualObserver.observe(chunk.element));
 
         const backToTop = document.getElementById('backToTop');
         addEventListener('scroll', () => {{
