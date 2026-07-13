@@ -346,7 +346,18 @@ class ChatLabJSONExporter(BaseExporter):
 
             elif elem.type == ElementType.RED_PACKET:
                 prompt = elem.content.get('prompt', '')
-                label = "转账" if elem.content.get('wallet_type') == 'transfer' else "红包"
+                labels = {
+                    'transfer': '转账',
+                    'normal': '普通红包',
+                    'lucky': '拼手气红包',
+                    'password': '口令红包',
+                    'designated': '专属红包',
+                    'voice': '语音红包',
+                }
+                label = labels.get(elem.content.get('redbag_kind'))
+                if not label:
+                    raw_type = elem.content.get('redbag_type')
+                    label = f"红包（类型 {raw_type}）" if raw_type else "红包"
                 parts.append(f"[{label}: {prompt}]" if prompt else f"[{label}]")
 
             elif elem.type == ElementType.CALL:

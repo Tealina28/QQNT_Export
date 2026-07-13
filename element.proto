@@ -240,7 +240,8 @@ message Element {
   bytes walletTransferProto = 48402;
   WalletDetail walletDetail = 48403;
   string walletOrderId = 48409;
-  uint32 walletRedbagType = 48412; // 1=转账，2=普通红包，6=口令，15=语音
+  uint32 walletRedbagType = 48412; // 1=转账，2=普通，3=拼手气，6=口令，8=专属，15=语音
+  uint32 walletDesignatedUin = 48420; // 专属红包指定领取人
   WalletExt walletExt = 48421;
 
 

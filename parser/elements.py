@@ -366,13 +366,31 @@ def _notice_text(xml_text: str, json_text: str) -> str:
 def parse_red_packet(element) -> ParsedElement:
     """解析红包和转账消息。"""
     detail = element.walletDetail
-    wallet_type = element.walletRedbagType or detail.redbagType
+    fine_type = element.walletRedbagType
+    if fine_type:
+        redbag_type = fine_type
+    else:
+        redbag_type = {
+            1: 1,
+            2: 6,
+            4: 2,
+        }.get(detail.redbagType, detail.redbagType)
+    type_names = {
+        1: 'transfer',
+        2: 'normal',
+        3: 'lucky',
+        6: 'password',
+        8: 'designated',
+        15: 'voice',
+    }
     return ParsedElement(
         type=ElementType.RED_PACKET,
         content={
-            'wallet_type': 'transfer' if wallet_type == 1 else 'red_packet',
-            'redbag_type': wallet_type,
+            'wallet_type': 'transfer' if redbag_type == 1 else 'red_packet',
+            'redbag_type': redbag_type,
+            'redbag_kind': type_names.get(redbag_type, 'unknown'),
             'target_num': element.walletTargetNum or None,
+            'designated_num': element.walletDesignatedUin or None,
             'order_id': element.walletOrderId or None,
             'prompt': detail.prompt,
             'summary': detail.display,

@@ -642,10 +642,39 @@ class HTMLExporter(BaseExporter):
 
             elif elem.type == ElementType.RED_PACKET:
                 prompt = html.escape(elem.content.get('prompt', ''))
-                label = '转账' if elem.content.get('wallet_type') == 'transfer' else '红包'
+                labels = {
+                    'transfer': '转账',
+                    'normal': '普通红包',
+                    'lucky': '拼手气红包',
+                    'password': '口令红包',
+                    'designated': '专属红包',
+                    'voice': '语音红包',
+                }
+                kind = elem.content.get('redbag_kind')
+                label = labels.get(kind)
+                if not label:
+                    raw_type = elem.content.get('redbag_type')
+                    label = f'红包（类型 {raw_type}）' if raw_type else '红包'
+                designated = ''
+                designated_num = elem.content.get('designated_num')
+                if designated_num:
+                    target = next(
+                        (
+                            member for member in member_map.values()
+                            if member.qq_num == designated_num
+                        ),
+                        None,
+                    )
+                    target_name = (
+                        target.get_display_name() if target else str(designated_num)
+                    )
+                    designated = (
+                        f'<small>指定领取人：{html.escape(target_name)}</small>'
+                    )
                 parts.append(
-                    f'<div class="wallet-card"><strong>{label}</strong>'
-                    f'<span>{prompt or "QQ 钱包消息"}</span></div>'
+                    f'<div class="wallet-card wallet-{html.escape(kind or "unknown")}">'
+                    f'<strong>{label}</strong>'
+                    f'<span>{prompt or "QQ 钱包消息"}</span>{designated}</div>'
                 )
 
             elif elem.type == ElementType.CALL:
@@ -2015,7 +2044,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: linear-gradient(135deg, #ff9f43, #ff6b35);
             color: #fff;
         }}
-        .wallet-card span {{ font-size: 12px; opacity: .88; }}
+        .wallet-card span, .wallet-card small {{ font-size: 12px; opacity: .88; }}
+        .wallet-designated {{ background: linear-gradient(135deg, #f59f35, #e85d3f); }}
+        .wallet-transfer {{ background: linear-gradient(135deg, #4c9aff, #3375d6); }}
         .ark-card {{
             display: grid;
             min-width: 230px;
