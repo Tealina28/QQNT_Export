@@ -757,8 +757,8 @@ def _quote_reference(
         if element.type != ElementType.QUOTE:
             continue
         msg_id = (
-            element.content.get('orig_msg_id')
-            or element.content.get('orig_msg_id_ref')
+            element.content.get('orig_msg_id_ref')
+            or element.content.get('orig_msg_id')
         )
         return msg_id, element.content.get('orig_msg_seq')
     return None, None
