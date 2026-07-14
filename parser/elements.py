@@ -802,21 +802,22 @@ def compute_image_cache_paths(
         pic_path: chatpic 根目录
 
     Returns:
-        按 chatraw、可选 chatimg、chatthumb 排列的候选路径
+        按 chatraw、可选 chatimg、chatthumb _hd、chatthumb 排列
     """
     if not pic_path:
         return ()
 
     normalized_md5 = md5.upper()
-    folders = (
-        ("chatraw", "chatimg", "chatthumb")
-        if original else ("chatraw", "chatthumb")
-    )
+    folders = ("chatraw", "chatimg") if original else ("chatraw",)
     paths = []
     for folder in folders:
         crc64_value = _qq_crc64(f"{folder}:{normalized_md5}")
         file_name = f"Cache_{crc64_value:x}"
         paths.append(pic_path / folder / file_name[-3:] / file_name)
+    thumb_crc64 = _qq_crc64(f"chatthumb:{normalized_md5}")
+    thumb_name = f"Cache_{thumb_crc64:x}"
+    thumb_path = pic_path / "chatthumb" / thumb_name[-3:] / thumb_name
+    paths.extend((Path(f"{thumb_path}_hd"), thumb_path))
     return tuple(paths)
 
 
