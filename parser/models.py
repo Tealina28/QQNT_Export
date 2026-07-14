@@ -91,6 +91,13 @@ class ParsedMessage:
     sender_nickname: Optional[str] = None
     sender_card: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        if self.sender_uid:
+            self.sender_uid = str(self.sender_uid)
+            return
+        fallback = self.sender_num if self.sender_num is not None else self.msg_id
+        self.sender_uid = str(fallback or 'unknown')
+
     def is_group_message(self) -> bool:
         """判断是否为群聊消息"""
         return self.group_num is not None

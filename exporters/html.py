@@ -197,14 +197,14 @@ class HTMLExporter(BaseExporter):
             for uid in sorted(
                 state['sender_uids'],
                 key=lambda item: (
-                    state['member_map'][item].get_display_name()
-                    if state['member_map'].get(item) else item
+                    str(state['member_map'][item].get_display_name() or item)
+                    if state['member_map'].get(item) else str(item or '')
                 ),
             ):
                 member = state['member_map'].get(uid)
                 sender_options.append({
-                    'uid': uid,
-                    'name': member.get_display_name() if member else uid,
+                    'uid': str(uid),
+                    'name': str(member.get_display_name() if member else uid),
                 })
             first_date = state['first_date']
             last_date = state['last_date']
@@ -414,14 +414,14 @@ class HTMLExporter(BaseExporter):
         for uid in sorted(
             sender_uids,
             key=lambda item: (
-                member_map[item].get_display_name()
-                if member_map.get(item) else item
+                str(member_map[item].get_display_name() or item)
+                if member_map.get(item) else str(item or '')
             ),
         ):
             member = member_map.get(uid)
-            name = member.get_display_name() if member else uid
+            name = str(member.get_display_name() if member else uid)
             sender_options.append(
-                f'<option value="{html.escape(uid, quote=True)}">'
+                f'<option value="{html.escape(str(uid), quote=True)}">'
                 f'{html.escape(name)}</option>'
             )
 
