@@ -27,6 +27,7 @@ class HTMLExporter(BaseExporter):
     def __init__(self, output_path: Path, config: dict[str, Any]):
         super().__init__(output_path, config)
         self._image_resource_map: dict[str, str] = {}
+        self._image_fallback_map: dict[str, str] = {}
         self._stream_state: dict[str, Any] | None = None
 
     def export(
@@ -354,34 +355,37 @@ class HTMLExporter(BaseExporter):
         from parser.elements import compute_image_cache_paths
 
         md5 = content.get('md5')
-        if not md5 or md5 in self._image_resource_map:
+        if (
+            not md5
+            or md5 in self._image_resource_map
+            or md5 in self._image_fallback_map
+        ):
             return
         candidates = compute_image_cache_paths(
             md5, content.get('original', 0), pic_path
         )
         thumbnail = candidates[-1] if candidates else None
 
-        def copy_source(source: Path) -> bool:
+        def copy_source(source: Path) -> str | None:
             if not source.is_file():
-                return False
+                return None
             destination = images_dir / f"{md5}{source.suffix or '.jpg'}"
             try:
                 if not destination.exists():
                     shutil.copy2(source, destination)
-                self._image_resource_map[md5] = (
-                    f'resources/images/{destination.name}'
-                )
-                return True
+                return f'resources/images/{destination.name}'
             except OSError:
-                return False
+                return None
 
         for source in candidates[:-1]:
-            if copy_source(source):
+            copied_source = copy_source(source)
+            if copied_source:
+                self._image_resource_map[md5] = copied_source
                 return
-        if self._resolve_image_cdn_source(content):
-            return
         if thumbnail:
-            copy_source(thumbnail)
+            copied_thumbnail = copy_source(thumbnail)
+            if copied_thumbnail:
+                self._image_fallback_map[md5] = copied_thumbnail
 
     @staticmethod
     def _resolve_image_cdn_source(content: dict) -> str | None:
@@ -1009,20 +1013,34 @@ class HTMLExporter(BaseExporter):
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
-        image_source = self._resolve_image_source(content)
+        image_source, fallback_source = self._resolve_image_sources(content)
         if not image_source:
             return '<div class="text">[图片]</div>'
         path_attr = html.escape(image_source, quote=True)
+        fallback_attr = ''
+        if fallback_source:
+            fallback_attr = (
+                ' data-fallback-src="'
+                f'{html.escape(fallback_source, quote=True)}"'
+                ' onerror="useImageFallback(this)"'
+            )
         return (
             f'<button class="image-button" type="button" '
             f'data-src="{path_attr}" '
             f'onclick="showImage(this.dataset.src)">'
             f'<img src="{path_attr}" class="message-image" '
-            f'alt="图片" loading="lazy"></button>'
+            f'alt="图片" loading="lazy"{fallback_attr}></button>'
         )
 
     def _resolve_image_source(self, content: dict) -> str | None:
-        """返回图片相对路径，不生成可交互 HTML。"""
+        """返回图片的首选来源。"""
+        return self._resolve_image_sources(content)[0]
+
+    def _resolve_image_sources(
+        self,
+        content: dict,
+    ) -> tuple[str | None, str | None]:
+        """返回图片的首选来源及可选缩略图回退来源。"""
         from parser.elements import compute_image_cache_paths
 
         md5 = content.get('md5')
@@ -1033,7 +1051,14 @@ class HTMLExporter(BaseExporter):
 
         if copy_resources:
             copied_source = self._image_resource_map.get(md5) if md5 else None
-            return copied_source or cdn_source
+            if copied_source:
+                return copied_source, None
+            copied_thumbnail = (
+                self._image_fallback_map.get(md5) if md5 else None
+            )
+            if cdn_source:
+                return cdn_source, copied_thumbnail
+            return copied_thumbnail, None
 
         pic_path = self.config.get('pic_path')
         candidates = (
@@ -1045,13 +1070,17 @@ class HTMLExporter(BaseExporter):
         thumbnail = candidates[-1] if candidates else None
         for source in candidates[:-1]:
             if source.is_file():
-                return self._relative_image_source(source)
+                return self._relative_image_source(source), None
+        thumbnail_source = (
+            self._relative_image_source(thumbnail)
+            if thumbnail and thumbnail.is_file() else None
+        )
         if cdn_source:
-            return cdn_source
-        if thumbnail and thumbnail.is_file():
-            return self._relative_image_source(thumbnail)
+            return cdn_source, thumbnail_source
+        if thumbnail_source:
+            return thumbnail_source, None
 
-        return None
+        return None, None
 
     def _render_forward_messages(
         self,
@@ -1195,13 +1224,22 @@ class HTMLExporter(BaseExporter):
             if element.type == ElementType.QUOTE:
                 continue
             if element.type == ElementType.IMAGE:
-                image_source = self._resolve_image_source(element.content)
+                image_source, fallback_source = self._resolve_image_sources(
+                    element.content
+                )
                 if image_source:
                     source = html.escape(image_source, quote=True)
+                    fallback_attr = ''
+                    if fallback_source:
+                        fallback_attr = (
+                            ' data-fallback-src="'
+                            f'{html.escape(fallback_source, quote=True)}"'
+                            ' onerror="useImageFallback(this)"'
+                        )
                     return (
                         '<div class="quote-media">'
                         f'<img src="{source}" class="message-image" '
-                        'alt="引用图片" loading="lazy"></div>'
+                        f'alt="引用图片" loading="lazy"{fallback_attr}></div>'
                     )
                 return '<span class="quote-media-label">[图片]</span>'
             if element.type == ElementType.VIDEO:
@@ -2982,6 +3020,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         senderFilter.addEventListener('change', applyFilters);
         document.getElementById('previousResult').onclick = () => moveToResult(-1);
         document.getElementById('nextResult').onclick = () => moveToResult(1);
+
+        function useImageFallback(image) {{
+            const fallback = image.dataset.fallbackSrc;
+            if (!fallback) return;
+            delete image.dataset.fallbackSrc;
+            image.src = fallback;
+            const button = image.closest('.image-button');
+            if (button) button.dataset.src = fallback;
+        }}
 
         function showImage(src) {{
             const modal = document.getElementById('imageModal');
