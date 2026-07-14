@@ -26,8 +26,7 @@ class HTMLExporter(BaseExporter):
 
     def __init__(self, output_path: Path, config: dict[str, Any]):
         super().__init__(output_path, config)
-        self._image_resource_map: dict[str, str] = {}
-        self._image_fallback_map: dict[str, str] = {}
+        self._image_resource_map: dict[tuple[str, str], str] = {}
         self._stream_state: dict[str, Any] | None = None
 
     def export(
@@ -352,48 +351,33 @@ class HTMLExporter(BaseExporter):
         images_dir: Path,
     ) -> None:
         import shutil
-        from parser.elements import compute_image_cache_paths
 
         md5 = content.get('md5')
-        if (
-            not md5
-            or md5 in self._image_resource_map
-            or md5 in self._image_fallback_map
-        ):
+        if not md5:
             return
-        candidates = compute_image_cache_paths(
-            md5, content.get('original', 0), pic_path
-        )
-        thumbnail = candidates[-1] if candidates else None
-
-        def copy_source(source: Path) -> str | None:
-            if not source.is_file():
-                return None
-            destination = images_dir / f"{md5}{source.suffix or '.jpg'}"
+        for source_type, source_name, source in self._image_source_steps(
+            content, pic_path
+        ):
+            if source_type != 'local' or not source or not source.is_file():
+                continue
+            key = (md5, source_name)
+            if key in self._image_resource_map:
+                return
+            destination = images_dir / (
+                f"{md5}_{source_name}{source.suffix or '.jpg'}"
+            )
             try:
                 if not destination.exists():
                     shutil.copy2(source, destination)
-                return f'resources/images/{destination.name}'
+                self._image_resource_map[key] = (
+                    f'resources/images/{destination.name}'
+                )
             except OSError:
-                return None
-
-        for source in candidates[:-1]:
-            copied_source = copy_source(source)
-            if copied_source:
-                self._image_resource_map[md5] = copied_source
-                return
-        if thumbnail:
-            copied_thumbnail = copy_source(thumbnail)
-            if copied_thumbnail:
-                self._image_fallback_map[md5] = copied_thumbnail
+                continue
+            return
 
     @staticmethod
-    def _resolve_image_cdn_source(content: dict) -> str | None:
-        raw_url = (
-            content.get('url_origin')
-            or content.get('url_preview')
-            or content.get('url_thumbnail')
-        )
+    def _resolve_image_url(raw_url: str | None, host: str | None) -> str | None:
         if not raw_url:
             return None
         if raw_url.startswith(('http://', 'https://')):
@@ -401,7 +385,7 @@ class HTMLExporter(BaseExporter):
         if raw_url.startswith('//'):
             return f'https:{raw_url}'
 
-        host = content.get('cdn_host') or ''
+        host = host or ''
         if host:
             base_url = (
                 host if host.startswith(('http://', 'https://'))
@@ -416,6 +400,55 @@ class HTMLExporter(BaseExporter):
         else:
             return None
         return urljoin(f'{base_url.rstrip("/")}/', raw_url)
+
+    @classmethod
+    def _resolve_image_cdn_source(cls, content: dict) -> str | None:
+        for field in ('url_origin', 'url_preview', 'url_thumbnail'):
+            source = cls._resolve_image_url(
+                content.get(field), content.get('cdn_host')
+            )
+            if source:
+                return source
+        return None
+
+    def _image_source_steps(
+        self,
+        content: dict,
+        pic_path: Path | None,
+    ) -> list[tuple[str, str, Path | str | None]]:
+        from parser.elements import compute_image_cache_paths
+
+        md5 = content.get('md5')
+        original = bool(content.get('original', 0))
+        local_paths: dict[str, Path] = {}
+        if md5 and pic_path:
+            candidates = compute_image_cache_paths(md5, int(original), pic_path)
+            kinds = (
+                ('raw', 'img', 'hd', 'thumb')
+                if original else ('raw', 'hd', 'thumb')
+            )
+            local_paths = dict(zip(kinds, candidates))
+
+        host = content.get('cdn_host')
+        steps: list[tuple[str, str, Path | str | None]] = [
+            ('local', 'raw', local_paths.get('raw')),
+            ('url', 'origin', self._resolve_image_url(
+                content.get('url_origin'), host
+            )),
+        ]
+        if original:
+            steps.append(('local', 'img', local_paths.get('img')))
+        steps.extend((
+            ('url', 'high', self._resolve_image_url(
+                content.get('url_preview'), host
+            )),
+            ('local', 'hd', local_paths.get('hd')),
+            ('url', 'low', self._resolve_image_url(
+                content.get('url_thumbnail'), host
+            )),
+            ('local', 'thumb', local_paths.get('thumb')),
+        ))
+        return steps
 
     def _relative_image_source(self, source: Path) -> str | None:
         try:
@@ -1013,17 +1046,12 @@ class HTMLExporter(BaseExporter):
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
-        image_source, fallback_source = self._resolve_image_sources(content)
-        if not image_source:
+        image_sources = self._resolve_image_sources(content)
+        if not image_sources:
             return '<div class="text">[图片]</div>'
+        image_source = image_sources[0]
         path_attr = html.escape(image_source, quote=True)
-        fallback_attr = ''
-        if fallback_source:
-            fallback_attr = (
-                ' data-fallback-src="'
-                f'{html.escape(fallback_source, quote=True)}"'
-                ' onerror="useImageFallback(this)"'
-            )
+        fallback_attr = self._image_fallback_attr(image_sources)
         return (
             f'<button class="image-button" type="button" '
             f'data-src="{path_attr}" '
@@ -1034,53 +1062,46 @@ class HTMLExporter(BaseExporter):
 
     def _resolve_image_source(self, content: dict) -> str | None:
         """返回图片的首选来源。"""
-        return self._resolve_image_sources(content)[0]
+        sources = self._resolve_image_sources(content)
+        return sources[0] if sources else None
+
+    @staticmethod
+    def _image_fallback_attr(sources: list[str]) -> str:
+        if len(sources) < 2:
+            return ''
+        fallbacks = html.escape(
+            json.dumps(sources[1:], ensure_ascii=False), quote=True
+        )
+        return (
+            f' data-fallback-srcs="{fallbacks}"'
+            ' onerror="useImageFallback(this)"'
+        )
 
     def _resolve_image_sources(
         self,
         content: dict,
-    ) -> tuple[str | None, str | None]:
-        """返回图片的首选来源及可选缩略图回退来源。"""
-        from parser.elements import compute_image_cache_paths
-
+    ) -> list[str]:
+        """按既定优先级返回图片来源及逐级回退链。"""
         md5 = content.get('md5')
-        cdn_source = self._resolve_image_cdn_source(content)
-
-        # 检查是否复制资源
         copy_resources = self.config.get('copy_resources', True)
-
-        if copy_resources:
-            copied_source = self._image_resource_map.get(md5) if md5 else None
-            if copied_source:
-                return copied_source, None
-            copied_thumbnail = (
-                self._image_fallback_map.get(md5) if md5 else None
-            )
-            if cdn_source:
-                return cdn_source, copied_thumbnail
-            return copied_thumbnail, None
-
         pic_path = self.config.get('pic_path')
-        candidates = (
-            compute_image_cache_paths(
-                md5, content.get('original', 0), Path(pic_path)
-            )
-            if md5 and pic_path else ()
-        )
-        thumbnail = candidates[-1] if candidates else None
-        for source in candidates[:-1]:
-            if source.is_file():
-                return self._relative_image_source(source), None
-        thumbnail_source = (
-            self._relative_image_source(thumbnail)
-            if thumbnail and thumbnail.is_file() else None
-        )
-        if cdn_source:
-            return cdn_source, thumbnail_source
-        if thumbnail_source:
-            return thumbnail_source, None
+        sources = []
+        for source_type, source_name, source in self._image_source_steps(
+            content, Path(pic_path) if pic_path else None
+        ):
+            resolved = None
+            if source_type == 'url':
+                resolved = source
+            elif source and copy_resources and md5:
+                resolved = self._image_resource_map.get((md5, source_name))
+            elif source and source.is_file():
+                resolved = self._relative_image_source(source)
 
-        return None, None
+            if resolved and resolved not in sources:
+                sources.append(str(resolved))
+                if source_type == 'local':
+                    break
+        return sources
 
     def _render_forward_messages(
         self,
@@ -1224,18 +1245,11 @@ class HTMLExporter(BaseExporter):
             if element.type == ElementType.QUOTE:
                 continue
             if element.type == ElementType.IMAGE:
-                image_source, fallback_source = self._resolve_image_sources(
-                    element.content
-                )
-                if image_source:
+                image_sources = self._resolve_image_sources(element.content)
+                if image_sources:
+                    image_source = image_sources[0]
                     source = html.escape(image_source, quote=True)
-                    fallback_attr = ''
-                    if fallback_source:
-                        fallback_attr = (
-                            ' data-fallback-src="'
-                            f'{html.escape(fallback_source, quote=True)}"'
-                            ' onerror="useImageFallback(this)"'
-                        )
+                    fallback_attr = self._image_fallback_attr(image_sources)
                     return (
                         '<div class="quote-media">'
                         f'<img src="{source}" class="message-image" '
@@ -3022,9 +3036,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('nextResult').onclick = () => moveToResult(1);
 
         function useImageFallback(image) {{
-            const fallback = image.dataset.fallbackSrc;
-            if (!fallback) return;
-            delete image.dataset.fallbackSrc;
+            const fallbacks = JSON.parse(image.dataset.fallbackSrcs || '[]');
+            const fallback = fallbacks.shift();
+            if (!fallback) {{
+                delete image.dataset.fallbackSrcs;
+                return;
+            }}
+            image.dataset.fallbackSrcs = JSON.stringify(fallbacks);
             image.src = fallback;
             const button = image.closest('.image-button');
             if (button) button.dataset.src = fallback;
