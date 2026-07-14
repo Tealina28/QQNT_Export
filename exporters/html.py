@@ -221,6 +221,7 @@ class HTMLExporter(BaseExporter):
             'id': f'msg-{message.msg_id}',
             'messageId': str(message.msg_id),
             'seq': str(message.seq),
+            'timestamp': message.timestamp,
             'search': search_text,
             'sender': str(message.sender_uid),
             'date': date_id,
@@ -451,12 +452,19 @@ class HTMLExporter(BaseExporter):
         chat_type = '群聊' if meta.get('type') == 'group' else '私聊'
         export_time = datetime.fromtimestamp(int(time.time())).strftime('%Y-%m-%d %H:%M')
 
-        # 同时按雪花 ID 和 seq 建立映射；新数据优先使用雪花 ID。
+        # 引用中的 seq 并不稳定；只用平台消息 ID 或发送者+时间定位。
         all_messages = [msg for _, msgs in messages_by_date for msg in msgs]
-        message_map = {}
+        message_map: dict[object, ParsedMessage] = {}
+        identity_candidates: dict[tuple[str, str, int], list[ParsedMessage]] = {}
         for message in all_messages:
-            message_map[message.msg_id] = message
-            message_map.setdefault(str(message.seq), message)
+            message_map[('id', str(message.msg_id))] = message
+            identity_key = (
+                'identity', str(message.sender_uid), message.timestamp
+            )
+            identity_candidates.setdefault(identity_key, []).append(message)
+        for identity_key, candidates in identity_candidates.items():
+            if len(candidates) == 1:
+                message_map[identity_key] = candidates[0]
 
         message_count = len(all_messages)
         if all_messages:
@@ -536,7 +544,7 @@ class HTMLExporter(BaseExporter):
         member_map: dict[str, ParsedMember],
         owner_id: str,
         avatar_map: dict[str, str],
-        message_map: dict[str, ParsedMessage]
+        message_map: dict[object, ParsedMessage]
     ) -> str:
         """渲染单条消息"""
         is_self = (msg.sender_uid == owner_id)
@@ -556,6 +564,7 @@ class HTMLExporter(BaseExporter):
                 f'<div class="message-entry system-message" '
                 f'id="msg-{html.escape(msg.msg_id)}" '
                 f'data-message-seq="{msg.seq}" '
+                f'data-message-timestamp="{msg.timestamp}" '
                 f'data-search="{search_text}" data-sender="">'
                 f'<span class="system-text">{html.escape(notice_text)}</span>'
                 f'<time title="{full_time}">'
@@ -595,18 +604,20 @@ class HTMLExporter(BaseExporter):
             None,
         )
         quote_content = quote_element.content if quote_element else {}
-        quote_keys = []
-        for value in (
-            quote_content.get('orig_msg_id_ref'),
-            msg.quoted_msg_id,
-            msg.quoted_msg_seq,
-        ):
-            if value:
-                key = str(value)
-                if key not in quote_keys:
-                    quote_keys.append(key)
+        quote_keys: list[object] = []
+        direct_id = quote_content.get('orig_msg_id_ref')
+        if direct_id:
+            quote_keys.append(('id', str(direct_id)))
+        elif quote_element is None and msg.quoted_msg_id:
+            quote_keys.append(('id', str(msg.quoted_msg_id)))
+        quote_sender = quote_content.get('sender_uid')
+        quote_timestamp = quote_content.get('quoted_timestamp')
+        if quote_sender and quote_timestamp:
+            quote_keys.append((
+                'identity', str(quote_sender), quote_timestamp
+            ))
 
-        if quote_keys:
+        if quote_element or quote_keys:
             quoted_msg = next(
                 (message_map[key] for key in quote_keys if key in message_map),
                 None,
@@ -637,20 +648,38 @@ class HTMLExporter(BaseExporter):
                     f'<div class="quote-sender">{html.escape(quoted_sender_name)}</div>'
                     if quoted_sender_name else ''
                 )
-                target_reference = (
-                    quote_content.get('orig_msg_id_ref')
-                    or msg.quoted_msg_seq
-                    or quote_content.get('orig_msg_seq')
-                    or msg.quoted_msg_id
-                    or quote_content.get('orig_msg_id')
+                target_id = quote_content.get('orig_msg_id_ref')
+                if quote_element is None:
+                    target_id = target_id or msg.quoted_msg_id
+                target_seq = (
+                    quote_content.get('orig_msg_seq') or msg.quoted_msg_seq
                 )
+                target_attrs = []
+                if target_id:
+                    target_attrs.append(
+                        'data-target-message-id="'
+                        f'{html.escape(str(target_id), quote=True)}"'
+                    )
+                if target_seq:
+                    target_attrs.append(
+                        'data-target-message-seq="'
+                        f'{html.escape(str(target_seq), quote=True)}"'
+                    )
+                if quote_sender:
+                    target_attrs.append(
+                        'data-target-message-sender="'
+                        f'{html.escape(str(quote_sender), quote=True)}"'
+                    )
+                if quote_timestamp:
+                    target_attrs.append(
+                        f'data-target-message-time="{quote_timestamp}"'
+                    )
                 target_attr = ''
                 target_class = 'quote'
-                if target_reference:
-                    target_attr = (
-                        f' data-target-message-id="{html.escape(str(target_reference), quote=True)}"'
-                        ' title="跳转到被引用的消息"'
-                    )
+                has_identity = bool(quote_sender and quote_timestamp)
+                if target_id or has_identity:
+                    target_attr = ' ' + ' '.join(target_attrs)
+                    target_attr += ' title="跳转到被引用的消息"'
                     target_class += ' quote-link'
                 quoted_html = f'''
 <button type="button" class="{target_class}"{target_attr}>
@@ -664,7 +693,7 @@ class HTMLExporter(BaseExporter):
             self._extract_text_content(msg.elements),
         )).lower()
         return f'''
-<div class="message-entry message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}" data-message-seq="{msg.seq}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
+<div class="message-entry message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}" data-message-seq="{msg.seq}" data-message-timestamp="{msg.timestamp}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
     <div class="avatar">{avatar_html}</div>
     <div class="message-wrapper">
         <div class="meta">
@@ -2574,6 +2603,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const dateBlockMap = new Map(dateBlocks.map(block => [block.dataset.date, block]));
         const messageRecords = [];
         const messageReferenceMap = new Map();
+        const messageIdentityMap = new Map();
         const virtualChunks = [];
         const virtualChunkMap = new WeakMap();
         const firstRecordByDate = new Map();
@@ -2583,11 +2613,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? JSON.parse(messageIndexNode.textContent || '[]') : null;
         if (messageIndexNode) messageIndexNode.remove();
 
+        function messageIdentity(sender, timestamp) {{
+            if (!sender || !timestamp) return '';
+            return JSON.stringify([String(sender), String(timestamp)]);
+        }}
+
         function registerRecord(record) {{
             messageRecords.push(record);
             messageReferenceMap.set(record.messageId, record);
-            if (record.seq && !messageReferenceMap.has(record.seq)) {{
-                messageReferenceMap.set(record.seq, record);
+            const identity = messageIdentity(record.sender, record.timestamp);
+            if (identity) {{
+                if (messageIdentityMap.has(identity)) {{
+                    const existing = messageIdentityMap.get(identity);
+                    if (Array.isArray(existing)) existing.push(record);
+                    else messageIdentityMap.set(identity, [existing, record]);
+                }} else {{
+                    messageIdentityMap.set(identity, record);
+                }}
             }}
             if (!firstRecordByDate.has(record.date)) {{
                 firstRecordByDate.set(record.date, record);
@@ -2634,6 +2676,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             id: element.id,
                             messageId: element.id.slice(4),
                             seq: element.dataset.messageSeq,
+                            timestamp: element.dataset.messageTimestamp,
                             html: element.outerHTML,
                             search: element.dataset.search,
                             sender: element.dataset.sender,
@@ -2904,23 +2947,78 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.body.style.overflow = '';
         }}
 
-        function scrollToMessage(msgId) {{
-            const record = messageReferenceMap.get(String(msgId));
-            const elementId = record ? record.id : 'msg-' + msgId;
+        function resolveQuoteRecord(reference) {{
+            const directId = reference.dataset.targetMessageId;
+            if (directId) {{
+                const direct = messageReferenceMap.get(String(directId));
+                if (direct) return direct;
+            }}
+
+            const sender = reference.dataset.targetMessageSender || '';
+            const timestamp = reference.dataset.targetMessageTime || '';
+            const identity = messageIdentity(sender, timestamp);
+            if (identity) {{
+                const exact = messageIdentityMap.get(identity);
+                if (exact && !Array.isArray(exact)) return exact;
+                const seq = reference.dataset.targetMessageSeq;
+                if (seq && Array.isArray(exact)) {{
+                    const matches = exact.filter(record => record.seq === seq);
+                    if (matches.length === 1) return matches[0];
+                }}
+            }}
+            return null;
+        }}
+
+        function alignMessageTarget(target) {{
+            target.scrollIntoView({{ behavior: 'auto', block: 'center' }});
+        }}
+
+        function stabilizeMessageTarget(
+            target, jumpGeneration, previousTop, stableCount = 0, attempt = 0
+        ) {{
+            if (jumpGeneration !== timelineJumpGeneration || !target.isConnected) return;
+            const documentTop = target.getBoundingClientRect().top + scrollY;
+            const nextStableCount = Math.abs(documentTop - previousTop) < 1
+                ? stableCount + 1 : 0;
+            alignMessageTarget(target);
+            if (nextStableCount >= 3 || attempt >= 20) return;
+            setTimeout(() => stabilizeMessageTarget(
+                target,
+                jumpGeneration,
+                documentTop,
+                nextStableCount,
+                attempt + 1,
+            ), 50);
+        }}
+
+        function scrollToMessage(reference) {{
+            const record = resolveQuoteRecord(reference);
+            if (!record) return;
+            const elementId = record.id;
             let target = document.getElementById(elementId);
             if (!target && filterActive && record) {{
                 searchInput.value = '';
                 senderFilter.value = '';
                 leaveFilteredMode();
             }}
-            if (!target && record) {{
+            const jumpGeneration = ++timelineJumpGeneration;
+            virtualObserver.disconnect();
+            if (!target) {{
                 loadVirtualChunk(record.chunk);
                 target = document.getElementById(elementId);
             }}
             if (!target) return;
-            target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+            const initialTop = target.getBoundingClientRect().top + scrollY;
+            alignMessageTarget(target);
             target.classList.add('message-highlight');
             setTimeout(() => target.classList.remove('message-highlight'), 1800);
+            requestAnimationFrame(() => {{
+                if (jumpGeneration !== timelineJumpGeneration) return;
+                if (!filterActive) {{
+                    virtualChunks.forEach(chunk => virtualObserver.observe(chunk.element));
+                }}
+                stabilizeMessageTarget(target, jumpGeneration, initialTop);
+            }});
         }}
 
         document.addEventListener('click', event => {{
@@ -2937,11 +3035,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }}
             const quote = event.target.closest(
-                '.quote-link[data-target-message-id]'
+                '.quote-link'
             );
             if (!quote) return;
             event.preventDefault();
-            scrollToMessage(quote.dataset.targetMessageId);
+            scrollToMessage(quote);
         }});
 
         function alignDateTarget(target) {{
