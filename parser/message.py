@@ -124,12 +124,17 @@ class MessageParser:
         Returns:
             (ParsedElement 列表, 40900 缓存消息列表)
         """
+        raw_elements = msg.elements
+        needs_cached_messages = (
+            getattr(msg, 'msg_type', None) == 9
+            or any(element.type in (10, 16) for element in raw_elements.elements)
+        )
+
         cached_messages = []
         cache_bytes = getattr(msg, 'UNK_18', None)
-        if cache_bytes:
+        if needs_cached_messages and cache_bytes:
             cached_messages = _parse_forward_cache(cache_bytes)
 
-        raw_elements = msg.elements
         elements = [
             ElementParser.parse(element, cached_messages)
             for element in raw_elements.elements
