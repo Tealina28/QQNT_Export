@@ -2541,6 +2541,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let searchGeneration = 0;
         let searchInProgress = false;
         let searchTimer;
+        let timelineJumpGeneration = 0;
 
         function setTheme(theme) {{
             root.setAttribute('data-theme', theme);
@@ -2803,12 +2804,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             scrollToMessage(quote.dataset.targetMessageId);
         }});
 
+        function alignDateTarget(target) {{
+            const topbar = document.querySelector('.topbar');
+            const offset = (topbar ? topbar.offsetHeight : 0) + 12;
+            const top = target.getBoundingClientRect().top + scrollY - offset;
+            scrollTo({{ top, behavior: 'auto' }});
+        }}
+
         function scrollToDate(dateId) {{
             const target = document.getElementById('date-' + dateId);
             if (!target) return;
-            const firstRecord = firstRecordByDate.get(dateId);
-            if (firstRecord) loadVirtualChunk(firstRecord.chunk);
-            target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+            const jumpGeneration = ++timelineJumpGeneration;
+            if (!filterActive) {{
+                virtualObserver.disconnect();
+                const firstRecord = firstRecordByDate.get(dateId);
+                if (firstRecord) loadVirtualChunk(firstRecord.chunk);
+            }}
+            alignDateTarget(target);
+            requestAnimationFrame(() => {{
+                if (jumpGeneration !== timelineJumpGeneration) return;
+                alignDateTarget(target);
+                if (!filterActive) {{
+                    virtualChunks.forEach(chunk => virtualObserver.observe(chunk.element));
+                }}
+                requestAnimationFrame(() => {{
+                    if (jumpGeneration === timelineJumpGeneration) alignDateTarget(target);
+                }});
+                setTimeout(() => {{
+                    if (jumpGeneration === timelineJumpGeneration) alignDateTarget(target);
+                }}, 120);
+            }});
             if (matchMedia('(max-width: 860px)').matches) toggleTimeline(false);
         }}
 
