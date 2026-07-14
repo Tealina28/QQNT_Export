@@ -491,6 +491,7 @@ class HTMLExporter(BaseExporter):
             return (
                 f'<div class="message-entry system-message" '
                 f'id="msg-{html.escape(msg.msg_id)}" '
+                f'data-message-seq="{msg.seq}" '
                 f'data-search="{search_text}" data-sender="">'
                 f'<span class="system-text">{html.escape(notice_text)}</span>'
                 f'<time title="{full_time}">'
@@ -572,11 +573,18 @@ class HTMLExporter(BaseExporter):
                     f'<div class="quote-sender">{html.escape(quoted_sender_name)}</div>'
                     if quoted_sender_name else ''
                 )
+                target_reference = (
+                    quote_content.get('orig_msg_id_ref')
+                    or msg.quoted_msg_id
+                    or quote_content.get('orig_msg_id')
+                    or msg.quoted_msg_seq
+                    or quote_content.get('orig_msg_seq')
+                )
                 target_attr = ''
                 target_class = 'quote'
-                if msg.quoted_msg_id:
+                if target_reference:
                     target_attr = (
-                        f' data-target-message-id="{html.escape(msg.quoted_msg_id, quote=True)}"'
+                        f' data-target-message-id="{html.escape(str(target_reference), quote=True)}"'
                         ' title="跳转到被引用的消息"'
                     )
                     target_class += ' quote-link'
@@ -592,7 +600,7 @@ class HTMLExporter(BaseExporter):
             self._extract_text_content(msg.elements),
         )).lower()
         return f'''
-<div class="message-entry message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
+<div class="message-entry message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}" data-message-seq="{msg.seq}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
     <div class="avatar">{avatar_html}</div>
     <div class="message-wrapper">
         <div class="meta">
@@ -2401,7 +2409,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const dateBlocks = Array.from(document.querySelectorAll('.date-block'));
         const dateBlockMap = new Map(dateBlocks.map(block => [block.dataset.date, block]));
         const messageRecords = [];
-        const messageRecordMap = new Map();
+        const messageReferenceMap = new Map();
         const virtualChunks = [];
         const virtualChunkMap = new WeakMap();
         const firstRecordByDate = new Map();
@@ -2417,6 +2425,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const records = chunkEntries.map(element => {{
                     const record = {{
                         id: element.id,
+                        messageId: element.id.slice(4),
+                        seq: element.dataset.messageSeq,
                         html: element.outerHTML,
                         search: element.dataset.search,
                         sender: element.dataset.sender,
@@ -2425,7 +2435,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     }};
                     chunkElement.appendChild(element);
                     messageRecords.push(record);
-                    messageRecordMap.set(record.id, record);
+                    messageReferenceMap.set(record.messageId, record);
+                    if (record.seq && !messageReferenceMap.has(record.seq)) {{
+                        messageReferenceMap.set(record.seq, record);
+                    }}
                     if (!firstRecordByDate.has(record.date)) {{
                         firstRecordByDate.set(record.date, record);
                     }}
@@ -2673,9 +2686,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         function scrollToMessage(msgId) {{
-            const elementId = 'msg-' + msgId;
+            const record = messageReferenceMap.get(String(msgId));
+            const elementId = record ? record.id : 'msg-' + msgId;
             let target = document.getElementById(elementId);
-            const record = messageRecordMap.get(elementId);
             if (!target && filterActive && record) {{
                 searchInput.value = '';
                 senderFilter.value = '';
