@@ -798,18 +798,20 @@ def compute_image_cache_paths(
 
     Args:
         md5: 图片 MD5（大写十六进制）
-        original: 图片元素的 original 字段，用于保持现有首选目录
+        original: 图片元素的 original 字段；仅原图允许回退到 chatimg
         pic_path: chatpic 根目录
 
     Returns:
-        按首选目录、另一图片目录、缩略图目录排列的候选路径
+        按 chatraw、可选 chatimg、chatthumb 排列的候选路径
     """
     if not pic_path:
         return ()
 
     normalized_md5 = md5.upper()
-    preferred = "chatimg" if original else "chatraw"
-    folders = (preferred, "chatraw" if original else "chatimg", "chatthumb")
+    folders = (
+        ("chatraw", "chatimg", "chatthumb")
+        if original else ("chatraw", "chatthumb")
+    )
     paths = []
     for folder in folders:
         crc64_value = _qq_crc64(f"{folder}:{normalized_md5}")

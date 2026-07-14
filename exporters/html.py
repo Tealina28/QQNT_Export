@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryFile
 from typing import Any
+from urllib.parse import urljoin
 
 from parser.models import ParsedMessage, ParsedMember, ElementType
 from .base import BaseExporter
@@ -350,25 +351,77 @@ class HTMLExporter(BaseExporter):
         images_dir: Path,
     ) -> None:
         import shutil
-        from parser.elements import compute_image_cache_path
+        from parser.elements import compute_image_cache_paths
 
         md5 = content.get('md5')
         if not md5 or md5 in self._image_resource_map:
             return
-        source = compute_image_cache_path(
+        candidates = compute_image_cache_paths(
             md5, content.get('original', 0), pic_path
         )
-        if not source:
+        thumbnail = candidates[-1] if candidates else None
+
+        def copy_source(source: Path) -> bool:
+            if not source.is_file():
+                return False
+            destination = images_dir / f"{md5}{source.suffix or '.jpg'}"
+            try:
+                if not destination.exists():
+                    shutil.copy2(source, destination)
+                self._image_resource_map[md5] = (
+                    f'resources/images/{destination.name}'
+                )
+                return True
+            except OSError:
+                return False
+
+        for source in candidates[:-1]:
+            if copy_source(source):
+                return
+        if self._resolve_image_cdn_source(content):
             return
-        destination = images_dir / f"{md5}{source.suffix or '.jpg'}"
-        try:
-            if not destination.exists():
-                shutil.copy2(source, destination)
-            self._image_resource_map[md5] = (
-                f'resources/images/{destination.name}'
+        if thumbnail:
+            copy_source(thumbnail)
+
+    @staticmethod
+    def _resolve_image_cdn_source(content: dict) -> str | None:
+        raw_url = (
+            content.get('url_origin')
+            or content.get('url_preview')
+            or content.get('url_thumbnail')
+        )
+        if not raw_url:
+            return None
+        if raw_url.startswith(('http://', 'https://')):
+            return raw_url
+        if raw_url.startswith('//'):
+            return f'https:{raw_url}'
+
+        host = content.get('cdn_host') or ''
+        if host:
+            base_url = (
+                host if host.startswith(('http://', 'https://'))
+                else f'https://{host}'
             )
-        except OSError:
-            return
+        elif raw_url.startswith('/offpic_new/'):
+            base_url = 'https://c2cpicdw.qpic.cn'
+        elif raw_url.startswith('/gchatpic_new/'):
+            base_url = 'https://gchat.qpic.cn'
+        elif raw_url.startswith('/download?'):
+            base_url = 'https://multimedia.nt.qq.com.cn'
+        else:
+            return None
+        return urljoin(f'{base_url.rstrip("/")}/', raw_url)
+
+    def _relative_image_source(self, source: Path) -> str | None:
+        try:
+            import os
+            rel_path = os.path.relpath(
+                source.absolute(), self.output_path.absolute().parent
+            )
+            return rel_path.replace('\\', '/')
+        except (OSError, ValueError):
+            return None
 
     def _iter_resource_elements(self, elements: list):
         """递归遍历正文、引用缓存和合并转发中的资源元素。"""
@@ -970,37 +1023,33 @@ class HTMLExporter(BaseExporter):
 
     def _resolve_image_source(self, content: dict) -> str | None:
         """返回图片相对路径，不生成可交互 HTML。"""
-        from parser.elements import compute_image_cache_path
+        from parser.elements import compute_image_cache_paths
 
         md5 = content.get('md5')
-        if not md5:
-            return None
+        cdn_source = self._resolve_image_cdn_source(content)
 
         # 检查是否复制资源
         copy_resources = self.config.get('copy_resources', True)
 
         if copy_resources:
-            return self._image_resource_map.get(md5)
-        else:
-            # 模式 2：直接指向原始 pic_path 目录（使用相对路径）
-            pic_path = self.config.get('pic_path')
-            if pic_path:
-                pic_path_obj = Path(pic_path)
-                original = content.get('original', 0)
-                src_path = compute_image_cache_path(md5, original, pic_path_obj)
+            copied_source = self._image_resource_map.get(md5) if md5 else None
+            return copied_source or cdn_source
 
-                if src_path:
-                    # 计算从 HTML 文件到图片的相对路径
-                    try:
-                        # 使用 os.path.relpath 计算相对路径
-                        # output/c2c/张三.html -> ../../../mnt/d/chatpic/chatimg/xxx/Cache_xxx
-                        import os
-                        html_file = self.output_path.absolute()
-                        img_file = src_path.absolute()
-                        rel_path = os.path.relpath(img_file, html_file.parent)
-                        return rel_path.replace('\\', '/')
-                    except (OSError, ValueError):
-                        return None
+        pic_path = self.config.get('pic_path')
+        candidates = (
+            compute_image_cache_paths(
+                md5, content.get('original', 0), Path(pic_path)
+            )
+            if md5 and pic_path else ()
+        )
+        thumbnail = candidates[-1] if candidates else None
+        for source in candidates[:-1]:
+            if source.is_file():
+                return self._relative_image_source(source)
+        if cdn_source:
+            return cdn_source
+        if thumbnail and thumbnail.is_file():
+            return self._relative_image_source(thumbnail)
 
         return None
 
