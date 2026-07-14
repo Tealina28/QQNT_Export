@@ -619,7 +619,8 @@ class HTMLExporter(BaseExporter):
     def _render_message_content(
         self,
         elements: list,
-        member_map: dict[str, ParsedMember]
+        member_map: dict[str, ParsedMember],
+        forward_depth: int = 0,
     ) -> str:
         """渲染消息内容（文本、图片、转发等）"""
         parts = []
@@ -685,7 +686,11 @@ class HTMLExporter(BaseExporter):
                 # 检查是否为转发消息
                 fwd_msgs = elem.content.get('forward_messages', [])
                 if fwd_msgs:
-                    fwd_html = self._render_forward_messages(fwd_msgs, member_map)
+                    fwd_html = self._render_forward_messages(
+                        fwd_msgs,
+                        member_map,
+                        forward_depth,
+                    )
                     parts.append(fwd_html)
                 elif elem.type == ElementType.APPLICATION:
                     parts.append(self._render_application_card(elem.content))
@@ -907,43 +912,60 @@ class HTMLExporter(BaseExporter):
     def _render_forward_messages(
         self,
         forward_messages: list[ParsedMessage],
-        member_map: dict[str, ParsedMember]
+        member_map: dict[str, ParsedMember],
+        depth: int = 0,
     ) -> str:
-        """渲染转发消息"""
+        """渲染可展开的合并转发消息，支持递归嵌套。"""
+        if depth >= 4:
+            return '<div class="forward-more">嵌套转发层级过深</div>'
+
+        visible_messages = forward_messages[:100]
         items = []
-        for fwd_msg in forward_messages[:10]:  # 最多显示前 10 条
+        for fwd_msg in visible_messages:
             sender = member_map.get(fwd_msg.sender_uid)
-            sender_name = sender.get_display_name() if sender else fwd_msg.sender_uid
-
-            # 简化内容（只取文本）
-            content_parts = []
-            for elem in fwd_msg.elements:
-                if elem.type == ElementType.TEXT:
-                    content_parts.append(elem.content.get('text', ''))
-                elif elem.type == ElementType.IMAGE:
-                    content_parts.append('[图片]')
-
-            content = ''.join(content_parts) or '[消息]'
-            # 截断过长内容
-            if len(content) > 50:
-                content = content[:50] + '...'
+            sender_name = (
+                sender.get_display_name()
+                if sender
+                else fwd_msg.sender_nickname
+                or str(fwd_msg.sender_num)
+                or fwd_msg.sender_uid
+            )
+            content = self._render_message_content(
+                fwd_msg.elements,
+                member_map,
+                depth + 1,
+            )
+            if not content:
+                content = self._render_quote_preview(fwd_msg.elements)
+            if not content:
+                content = '<span class="placeholder-card">[消息]</span>'
+            timestamp = datetime.fromtimestamp(fwd_msg.timestamp).strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
 
             items.append(f'''
 <div class="forward-item">
-    <span class="forward-sender">{html.escape(sender_name)}</span>: {html.escape(content)}
+    <div class="forward-meta">
+        <span class="forward-sender">{html.escape(sender_name)}</span>
+        <time title="{html.escape(timestamp, quote=True)}">{timestamp[11:16]}</time>
+    </div>
+    <div class="forward-content">{content}</div>
 </div>
             ''')
 
         more_html = ''
-        if len(forward_messages) > 10:
-            more_html = f'<div class="forward-more">还有 {len(forward_messages) - 10} 条...</div>'
+        if len(forward_messages) > len(visible_messages):
+            more_html = (
+                f'<div class="forward-more">还有 '
+                f'{len(forward_messages) - len(visible_messages)} 条...</div>'
+            )
 
         return f'''
-<div class="forward-container">
-    <div class="forward-header">聊天记录 ({len(forward_messages)} 条)</div>
+<details class="forward-container" open>
+    <summary class="forward-header">聊天记录 ({len(forward_messages)} 条)</summary>
     {''.join(items)}
     {more_html}
-</div>
+</details>
         '''
 
     def _extract_text_content(self, elements: list) -> str:
@@ -1588,6 +1610,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .forward-header {{
             font-weight: 600;
             margin-bottom: 8px;
+            cursor: pointer;
+            list-style: none;
+        }}
+
+        .forward-header::-webkit-details-marker {{
+            display: none;
+        }}
+
+        .forward-header::before {{
+            content: '▾';
+            display: inline-block;
+            margin-right: 5px;
+            transition: transform .15s ease;
+        }}
+
+        .forward-container:not([open]) .forward-header::before {{
+            transform: rotate(-90deg);
+        }}
+
+        .forward-meta {{
+            display: flex;
+            align-items: baseline;
+            gap: 7px;
+        }}
+
+        .forward-meta time {{
+            color: var(--text-secondary);
+            font-size: 11px;
         }}
 
         .forward-item {{
@@ -1602,6 +1652,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .forward-sender {{
             font-weight: 600;
             margin-right: 4px;
+        }}
+
+        .forward-content {{
+            padding: 2px 0 3px 8px;
+        }}
+
+        .forward-content .message-image {{
+            max-width: 180px;
+            max-height: 140px;
         }}
 
         .forward-more {{
