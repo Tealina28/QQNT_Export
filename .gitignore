@@ -40,6 +40,9 @@ chatpic/
 *.tmp
 .cache/
 
+# 本地测试和验证代码不得纳入版本库
+/tests/
+
 # AI 辅助文档（本地供编码代理加载，不纳入版本库）
 /CLAUDE.md
 /AGENTS.md
