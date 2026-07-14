@@ -151,6 +151,11 @@ class HTMLExporter(BaseExporter):
             'first_date': None,
             'last_date': None,
             'current_date': None,
+            'current_date_id': None,
+            'chunk_index': 0,
+            'chunk_message_count': 0,
+            'chunk_open': False,
+            'message_index': [],
         }
         output.write(prefix)
 
@@ -164,6 +169,8 @@ class HTMLExporter(BaseExporter):
         date_id = date_str.replace(' ', '-').replace('/', '-')
         if date_str != state['current_date']:
             if state['current_date'] is not None:
+                if state['chunk_open']:
+                    output.write('</template>')
                 output.write('</div></section>')
             output.write(
                 f'<section class="date-block" id="date-{date_id}" data-date="{date_id}">'
@@ -172,13 +179,52 @@ class HTMLExporter(BaseExporter):
                 '<div class="messages">'
             )
             state['current_date'] = date_str
-        output.write(self._render_message(
+            state['current_date_id'] = date_id
+            state['chunk_message_count'] = 0
+            state['chunk_open'] = False
+        if not state['chunk_open'] or state['chunk_message_count'] >= 200:
+            if state['chunk_open']:
+                output.write('</template>')
+            state['chunk_index'] += 1
+            state['chunk_message_count'] = 0
+            state['chunk_open'] = True
+            output.write(
+                f'<template class="message-chunk-template" '
+                f'id="message-chunk-{state["chunk_index"]}" '
+                f'data-date="{date_id}">'
+            )
+        message_html = self._render_message(
             message,
             state['member_map'],
             state['owner_id'],
             state['avatar_map'],
             {},
-        ))
+        )
+        output.write(message_html)
+        sender = state['member_map'].get(message.sender_uid)
+        sender_name = str(
+            sender.get_display_name() if sender else message.sender_uid
+        )
+        if message.elements and message.elements[0].type == ElementType.NOTICE:
+            search_text = self._format_notice_text(
+                message.elements[0].content,
+                state['member_map'],
+            ).lower()
+        else:
+            search_text = ' '.join((
+                sender_name,
+                self._extract_text_content(message.elements),
+            )).lower()
+        state['message_index'].append({
+            'id': f'msg-{message.msg_id}',
+            'messageId': str(message.msg_id),
+            'seq': str(message.seq),
+            'search': search_text,
+            'sender': str(message.sender_uid),
+            'date': date_id,
+            'chunkId': f'message-chunk-{state["chunk_index"]}',
+        })
+        state['chunk_message_count'] += 1
         state['message_count'] += 1
         state['sender_uids'].add(message.sender_uid)
         state['date_counts'][date_str] = state['date_counts'].get(date_str, 0) + 1
@@ -192,6 +238,8 @@ class HTMLExporter(BaseExporter):
         output = state['output']
         try:
             if state['current_date'] is not None:
+                if state['chunk_open']:
+                    output.write('</template>')
                 output.write('</div></section>')
             sender_options = []
             for uid in sorted(
@@ -223,6 +271,13 @@ class HTMLExporter(BaseExporter):
             }, ensure_ascii=False).replace('</', '<\\/')
             output.write(
                 f'<script>window.__QQNT_EXPORT_META__={metadata};</script>'
+            )
+            message_index = json.dumps(
+                state['message_index'], ensure_ascii=False
+            ).replace('</', '<\\/')
+            output.write(
+                '<script type="application/json" id="__QQNT_MESSAGE_INDEX__">'
+                f'{message_index}</script>'
             )
             output.write(state['suffix'])
         finally:
@@ -2514,45 +2569,83 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const virtualChunkMap = new WeakMap();
         const firstRecordByDate = new Map();
         const virtualChunkSize = 200;
-        for (const block of dateBlocks) {{
-            const container = block.querySelector('.messages');
-            const entries = Array.from(container.querySelectorAll(':scope > .message-entry'));
-            for (let offset = 0; offset < entries.length; offset += virtualChunkSize) {{
-                const chunkEntries = entries.slice(offset, offset + virtualChunkSize);
+        const messageIndexNode = document.getElementById('__QQNT_MESSAGE_INDEX__');
+        const streamedMessageIndex = messageIndexNode
+            ? JSON.parse(messageIndexNode.textContent || '[]') : null;
+        if (messageIndexNode) messageIndexNode.remove();
+
+        function registerRecord(record) {{
+            messageRecords.push(record);
+            messageReferenceMap.set(record.messageId, record);
+            if (record.seq && !messageReferenceMap.has(record.seq)) {{
+                messageReferenceMap.set(record.seq, record);
+            }}
+            if (!firstRecordByDate.has(record.date)) {{
+                firstRecordByDate.set(record.date, record);
+            }}
+        }}
+
+        if (streamedMessageIndex) {{
+            const recordsByChunk = new Map();
+            for (const rawRecord of streamedMessageIndex) {{
+                const record = {{ ...rawRecord, html: null, chunk: null }};
+                registerRecord(record);
+                if (!recordsByChunk.has(record.chunkId)) recordsByChunk.set(record.chunkId, []);
+                recordsByChunk.get(record.chunkId).push(record);
+            }}
+            document.querySelectorAll('.message-chunk-template').forEach(template => {{
                 const chunkElement = document.createElement('div');
-                chunkElement.className = 'message-chunk';
-                container.insertBefore(chunkElement, chunkEntries[0]);
-                const records = chunkEntries.map(element => {{
-                    const record = {{
-                        id: element.id,
-                        messageId: element.id.slice(4),
-                        seq: element.dataset.messageSeq,
-                        html: element.outerHTML,
-                        search: element.dataset.search,
-                        sender: element.dataset.sender,
-                        date: block.dataset.date,
-                        chunk: null
-                    }};
-                    chunkElement.appendChild(element);
-                    messageRecords.push(record);
-                    messageReferenceMap.set(record.messageId, record);
-                    if (record.seq && !messageReferenceMap.has(record.seq)) {{
-                        messageReferenceMap.set(record.seq, record);
-                    }}
-                    if (!firstRecordByDate.has(record.date)) {{
-                        firstRecordByDate.set(record.date, record);
-                    }}
-                    return record;
-                }});
+                chunkElement.className = 'message-chunk is-virtualized';
+                const records = recordsByChunk.get(template.id) || [];
                 const chunk = {{
                     element: chunkElement,
-                    height: Math.max(chunkElement.offsetHeight, 1),
-                    loaded: true,
+                    template,
+                    height: Math.max(records.length * 82, 1),
+                    loaded: false,
                     records
                 }};
+                chunkElement.style.minHeight = chunk.height + 'px';
+                template.parentNode.insertBefore(chunkElement, template);
+                template.remove();
                 records.forEach(record => {{ record.chunk = chunk; }});
                 virtualChunks.push(chunk);
                 virtualChunkMap.set(chunkElement, chunk);
+            }});
+        }} else {{
+            for (const block of dateBlocks) {{
+                const container = block.querySelector('.messages');
+                const entries = Array.from(container.querySelectorAll(':scope > .message-entry'));
+                for (let offset = 0; offset < entries.length; offset += virtualChunkSize) {{
+                    const chunkEntries = entries.slice(offset, offset + virtualChunkSize);
+                    const chunkElement = document.createElement('div');
+                    chunkElement.className = 'message-chunk';
+                    container.insertBefore(chunkElement, chunkEntries[0]);
+                    const records = chunkEntries.map(element => {{
+                        const record = {{
+                            id: element.id,
+                            messageId: element.id.slice(4),
+                            seq: element.dataset.messageSeq,
+                            html: element.outerHTML,
+                            search: element.dataset.search,
+                            sender: element.dataset.sender,
+                            date: block.dataset.date,
+                            chunk: null
+                        }};
+                        chunkElement.appendChild(element);
+                        registerRecord(record);
+                        return record;
+                    }});
+                    const chunk = {{
+                        element: chunkElement,
+                        template: null,
+                        height: Math.max(chunkElement.offsetHeight, 1),
+                        loaded: true,
+                        records
+                    }};
+                    records.forEach(record => {{ record.chunk = chunk; }});
+                    virtualChunks.push(chunk);
+                    virtualChunkMap.set(chunkElement, chunk);
+                }}
             }}
         }}
         const originalContent = document.createDocumentFragment();
@@ -2600,9 +2693,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (chunk.loaded) return;
             chunk.element.classList.remove('is-virtualized');
             chunk.element.style.minHeight = '';
-            chunk.element.innerHTML = chunk.records
-                .map(record => record.html).join('');
+            if (chunk.template) {{
+                chunk.element.appendChild(chunk.template.content.cloneNode(true));
+            }} else {{
+                chunk.element.innerHTML = chunk.records
+                    .map(record => record.html).join('');
+            }}
             chunk.loaded = true;
+        }}
+
+        function ensureRecordHtml(record) {{
+            if (record.html) return record.html;
+            loadVirtualChunk(record.chunk);
+            for (const element of record.chunk.element.children) {{
+                if (element.id === record.id) {{
+                    record.html = element.outerHTML;
+                    return record.html;
+                }}
+            }}
+            return '';
         }}
 
         function unloadVirtualChunk(chunk) {{
@@ -2679,7 +2788,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         fragment.appendChild(section);
                         containers.set(record.date, container);
                     }}
-                    container.insertAdjacentHTML('beforeend', record.html);
+                    container.insertAdjacentHTML('beforeend', ensureRecordHtml(record));
                 }}
 
                 if (cursor < matches.length) {{
