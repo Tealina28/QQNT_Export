@@ -10,6 +10,7 @@ import time
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryFile
 from typing import Any
 
 from parser.models import ParsedMessage, ParsedMember, ElementType
@@ -155,7 +156,8 @@ class HTMLExporter(BaseExporter):
             'chunk_index': 0,
             'chunk_message_count': 0,
             'chunk_open': False,
-            'message_index': [],
+            'message_index_file': TemporaryFile(mode='w+t', encoding='utf-8'),
+            'message_index_first': True,
         }
         output.write(prefix)
 
@@ -215,7 +217,7 @@ class HTMLExporter(BaseExporter):
                 sender_name,
                 self._extract_text_content(message.elements),
             )).lower()
-        state['message_index'].append({
+        index_entry = json.dumps({
             'id': f'msg-{message.msg_id}',
             'messageId': str(message.msg_id),
             'seq': str(message.seq),
@@ -223,7 +225,11 @@ class HTMLExporter(BaseExporter):
             'sender': str(message.sender_uid),
             'date': date_id,
             'chunkId': f'message-chunk-{state["chunk_index"]}',
-        })
+        }, ensure_ascii=False).replace('</', '<\\/')
+        if not state['message_index_first']:
+            state['message_index_file'].write(',')
+        state['message_index_file'].write(index_entry)
+        state['message_index_first'] = False
         state['chunk_message_count'] += 1
         state['message_count'] += 1
         state['sender_uids'].add(message.sender_uid)
@@ -272,21 +278,24 @@ class HTMLExporter(BaseExporter):
             output.write(
                 f'<script>window.__QQNT_EXPORT_META__={metadata};</script>'
             )
-            message_index = json.dumps(
-                state['message_index'], ensure_ascii=False
-            ).replace('</', '<\\/')
             output.write(
                 '<script type="application/json" id="__QQNT_MESSAGE_INDEX__">'
-                f'{message_index}</script>'
             )
+            output.write('[')
+            state['message_index_file'].seek(0)
+            while chunk := state['message_index_file'].read(1024 * 1024):
+                output.write(chunk)
+            output.write(']</script>')
             output.write(state['suffix'])
         finally:
+            state['message_index_file'].close()
             output.close()
             self._stream_state = None
 
     def abort_stream(self) -> None:
         state = self._stream_state
         if state is not None:
+            state['message_index_file'].close()
             state['output'].close()
             self._stream_state = None
 
