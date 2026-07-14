@@ -639,10 +639,10 @@ class HTMLExporter(BaseExporter):
                 )
                 target_reference = (
                     quote_content.get('orig_msg_id_ref')
-                    or msg.quoted_msg_id
-                    or quote_content.get('orig_msg_id')
                     or msg.quoted_msg_seq
                     or quote_content.get('orig_msg_seq')
+                    or msg.quoted_msg_id
+                    or quote_content.get('orig_msg_id')
                 )
                 target_attr = ''
                 target_class = 'quote'
