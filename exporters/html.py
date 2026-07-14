@@ -2115,7 +2115,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .stat span {{ color: var(--text-secondary); font-size: 11px; }}
 
         .chat-surface {{
-            padding: 20px 22px 48px;
+            padding: 20px 22px calc(50vh + 48px);
             border: 1px solid var(--border);
             border-radius: 18px;
             background: var(--chat-bg);
@@ -2438,7 +2438,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .timeline-sidebar.active {{ left: 0; }}
             .timeline-close {{ display: grid; }}
             .hero {{ padding: 22px; }}
-            .chat-surface {{ padding: 18px 12px 40px; }}
+            .chat-surface {{ padding: 18px 12px calc(50vh + 40px); }}
             .date-divider {{ top: 118px; }}
         }}
 
@@ -2951,6 +2951,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             scrollTo({{ top, behavior: 'auto' }});
         }}
 
+        function stabilizeDateTarget(
+            target, jumpGeneration, previousTop, stableCount = 0, attempt = 0
+        ) {{
+            if (jumpGeneration !== timelineJumpGeneration) return;
+            const documentTop = target.getBoundingClientRect().top + scrollY;
+            const nextStableCount = Math.abs(documentTop - previousTop) < 1
+                ? stableCount + 1 : 0;
+            alignDateTarget(target);
+            if (nextStableCount >= 3 || attempt >= 20) return;
+            setTimeout(() => stabilizeDateTarget(
+                target,
+                jumpGeneration,
+                documentTop,
+                nextStableCount,
+                attempt + 1,
+            ), 50);
+        }}
+
         function scrollToDate(dateId) {{
             const target = document.getElementById('date-' + dateId);
             if (!target) return;
@@ -2960,19 +2978,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const firstRecord = firstRecordByDate.get(dateId);
                 if (firstRecord) loadVirtualChunk(firstRecord.chunk);
             }}
+            const initialTop = target.getBoundingClientRect().top + scrollY;
             alignDateTarget(target);
             requestAnimationFrame(() => {{
                 if (jumpGeneration !== timelineJumpGeneration) return;
-                alignDateTarget(target);
                 if (!filterActive) {{
                     virtualChunks.forEach(chunk => virtualObserver.observe(chunk.element));
                 }}
-                requestAnimationFrame(() => {{
-                    if (jumpGeneration === timelineJumpGeneration) alignDateTarget(target);
-                }});
-                setTimeout(() => {{
-                    if (jumpGeneration === timelineJumpGeneration) alignDateTarget(target);
-                }}, 120);
+                stabilizeDateTarget(target, jumpGeneration, initialTop);
             }});
             if (matchMedia('(max-width: 860px)').matches) toggleTimeline(false);
         }}
