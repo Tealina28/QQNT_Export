@@ -961,11 +961,16 @@ class HTMLExporter(BaseExporter):
             )
 
         return f'''
-<details class="forward-container" open>
-    <summary class="forward-header">聊天记录 ({len(forward_messages)} 条)</summary>
-    {''.join(items)}
-    {more_html}
-</details>
+<div class="forward-container">
+    <button type="button" class="forward-header" data-forward-toggle aria-expanded="false">
+        <span>聊天记录 ({len(forward_messages)} 条)</span>
+        <small>点击查看</small>
+    </button>
+    <div class="forward-body" hidden>
+        {''.join(items)}
+        {more_html}
+    </div>
+</div>
         '''
 
     def _extract_text_content(self, elements: list) -> str:
@@ -1608,25 +1613,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         .forward-header {{
+            display: flex;
+            width: 100%;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: inherit;
+            font: inherit;
             font-weight: 600;
-            margin-bottom: 8px;
             cursor: pointer;
-            list-style: none;
         }}
 
-        .forward-header::-webkit-details-marker {{
-            display: none;
+        .forward-header small {{
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 500;
         }}
 
-        .forward-header::before {{
-            content: '▾';
+        .forward-header span::before {{
+            content: '▸';
             display: inline-block;
             margin-right: 5px;
             transition: transform .15s ease;
         }}
 
-        .forward-container:not([open]) .forward-header::before {{
-            transform: rotate(-90deg);
+        .forward-header[aria-expanded="true"] span::before {{
+            transform: rotate(90deg);
+        }}
+
+        .forward-body {{
+            margin-top: 8px;
         }}
 
         .forward-meta {{
@@ -2764,6 +2783,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         document.addEventListener('click', event => {{
+            const forwardToggle = event.target.closest(
+                '.forward-header[data-forward-toggle]'
+            );
+            if (forwardToggle) {{
+                event.preventDefault();
+                const body = forwardToggle.nextElementSibling;
+                const expanded = forwardToggle.getAttribute('aria-expanded') === 'true';
+                forwardToggle.setAttribute('aria-expanded', String(!expanded));
+                forwardToggle.querySelector('small').textContent = expanded ? '点击查看' : '收起';
+                body.hidden = expanded;
+                return;
+            }}
             const quote = event.target.closest(
                 '.quote-link[data-target-message-id]'
             );
