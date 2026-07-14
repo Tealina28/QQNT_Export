@@ -126,7 +126,7 @@ class MessageParser:
         """
         cached_messages = []
         cache_bytes = getattr(msg, 'UNK_18', None)
-        if getattr(msg, 'msg_type', None) in (8, 9) and cache_bytes:
+        if cache_bytes:
             cached_messages = _parse_forward_cache(cache_bytes)
 
         raw_elements = msg.elements

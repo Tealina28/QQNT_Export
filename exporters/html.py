@@ -683,7 +683,6 @@ class HTMLExporter(BaseExporter):
                 )
 
             elif elem.type in (ElementType.APPLICATION, ElementType.MULTI_MSG):
-                # 检查是否为转发消息
                 fwd_msgs = elem.content.get('forward_messages', [])
                 if fwd_msgs:
                     fwd_html = self._render_forward_messages(
@@ -693,9 +692,12 @@ class HTMLExporter(BaseExporter):
                     )
                     parts.append(fwd_html)
                 elif elem.type == ElementType.APPLICATION:
-                    parts.append(self._render_application_card(elem.content))
+                    if elem.content.get('card_kind') == 'forward':
+                        parts.append(self._render_forward_unavailable(10))
+                    else:
+                        parts.append(self._render_application_card(elem.content))
                 else:
-                    parts.append('<div class="placeholder-card">应用消息</div>')
+                    parts.append(self._render_forward_unavailable(16))
 
             elif elem.type in (ElementType.EMOJI, ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
                 text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
@@ -972,6 +974,15 @@ class HTMLExporter(BaseExporter):
     </div>
 </div>
         '''
+
+    @staticmethod
+    def _render_forward_unavailable(element_type: int) -> str:
+        return (
+            '<div class="forward-container forward-unavailable">'
+            f'<strong>合并转发 · element type {element_type}</strong>'
+            '<small>未找到本地 40900 消息缓存，无法展开具体聊天记录</small>'
+            '</div>'
+        )
 
     def _extract_text_content(self, elements: list) -> str:
         """提取消息的纯文本内容（用于引用预览）"""
@@ -1686,6 +1697,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             margin-top: 8px;
             color: var(--text-secondary);
             font-style: italic;
+        }}
+
+        .forward-unavailable {{
+            display: grid;
+            gap: 5px;
+        }}
+
+        .forward-unavailable small {{
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 400;
         }}
 
         /* 系统消息 */
