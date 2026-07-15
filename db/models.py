@@ -12,7 +12,7 @@ from .protobuf import sanitize_protobuf
 
 __all__ = [
     "C2cMessage", "DatalineMessage", "GroupMessage", "UidMapping",
-    "ProfileInfo", "GroupList", "GroupMember",
+    "ProfileInfo", "GroupList", "GroupMember", "BaseSysEmoji",
 ]
 
 profile_map = {}
@@ -186,6 +186,19 @@ class UidMapping(Base):
     qq_num: Mapped[int] = mapped_column("1002")
 
     c2c_messages = relationship("C2cMessage", back_populates="mapping")
+
+
+@DatabaseManager.register_model("emoji")
+class BaseSysEmoji(Base):
+    """QQ 系统表情元数据。"""
+    __tablename__ = "base_sys_emoji_table"
+
+    emoji_id: Mapped[str] = mapped_column("81211", Text, primary_key=True)
+    description: Mapped[str] = mapped_column("81212", Text)
+    unicode_id: Mapped[int | None] = mapped_column("81214")
+    emoji_type: Mapped[int | None] = mapped_column("81226")
+    static_archive_url: Mapped[str | None] = mapped_column("81229", Text)
+    apng_archive_url: Mapped[str | None] = mapped_column("81230", Text)
 
 
 @DatabaseManager.register_model("profile_info")

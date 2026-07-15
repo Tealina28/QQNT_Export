@@ -1,10 +1,15 @@
 from collections import defaultdict
+import logging
 
-from sqlalchemy import create_engine, inspect, or_
+from sqlalchemy import create_engine, inspect, literal, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.query import Query
 
 __all__ = ["DatabaseManager"]
+
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -104,6 +109,67 @@ class DatabaseManager:
         """
         model = self._models["nt_msg"]["nt_uid_mapping_table"]
         return self.session.query(model).order_by(model.id).first()
+
+    def system_emojis(self):
+        """读取 QQ 系统表情的名称、类型和资源包信息。
+
+        emoji.db 在旧版数据目录中可能不存在，因此将它视为可选数据库。
+        """
+        model = self._models["emoji"]["base_sys_emoji_table"]
+        engine = self._engines.get("emoji")
+        if not engine or not inspect(engine).has_table(model.__tablename__):
+            return {}
+
+        available_columns = {
+            column['name']
+            for column in inspect(engine).get_columns(model.__tablename__)
+        }
+        if not {'81211', '81212'} <= available_columns:
+            return {}
+        optional_columns = (
+            ('81214', model.unicode_id),
+            ('81226', model.emoji_type),
+            ('81229', model.static_archive_url),
+            ('81230', model.apng_archive_url),
+        )
+        try:
+            rows = self.session.query(
+                model.emoji_id,
+                model.description,
+                *(
+                    column if name in available_columns else literal(None)
+                    for name, column in optional_columns
+                ),
+            ).all()
+        except SQLAlchemyError as exc:
+            logger.warning('读取系统表情数据库失败，将使用内置映射: %s', exc)
+            return {}
+
+        return {
+            emoji_id: {
+                'description': description,
+                'unicode_id': unicode_id,
+                'emoji_type': emoji_type,
+                'static_archive_url': static_archive_url,
+                'apng_archive_url': apng_archive_url,
+            }
+            for (
+                emoji_id,
+                description,
+                unicode_id,
+                emoji_type,
+                static_archive_url,
+                apng_archive_url,
+            ) in rows
+            if emoji_id is not None and description
+        }
+
+    def system_emoji_names(self):
+        """兼容只需要 ID 到外显文字的调用方。"""
+        return {
+            emoji_id: item['description']
+            for emoji_id, item in self.system_emojis().items()
+        }
 
     def group_messages(self, filters):
         model = self._models["nt_msg"]["group_msg_table"]

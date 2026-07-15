@@ -16,6 +16,7 @@
 - **单次解析**：同时导出多个格式时共享消息解析结果，避免重复扫描数据库
 - **离线头像**：ChatLab 输出成员/群头像，HTML 可复制 QQ NT 本地头像缓存
 - **跨设备消息**：导出 `dataline_msg_table` 中“我的手机/电脑/平板”同步记录
+- **QQ 系统表情**：读取可选的 `emoji.db`，HTML 优先显示 APNG、静态图并最终回退文字
 
 ## 📦 导出格式
 
@@ -72,6 +73,7 @@ output_format = ["chatlab_json", "chatlab_jsonl", "html"]
 stream_batch_size = 1000 # JSONL/HTML 每批读取的消息数
 copy_resources = true   # HTML 复制图片和本地头像
 avatar_path = ""        # 可选：nt_data/avatar 或 nt_data 目录
+emoji_path = ""         # 可选：nt_data 或 EmojiSystermResource 目录
 embed_avatars = false   # ChatLab 是否嵌入本地头像 Data URL
 ```
 

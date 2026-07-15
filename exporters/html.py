@@ -6,16 +6,24 @@ HTML 格式导出器
 
 import html
 import json
+import logging
 import time
+import zipfile
 from collections.abc import Iterable
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryFile
 from typing import Any
-from urllib.parse import urljoin
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlparse
+from urllib.request import Request, urlopen
 
 from parser.models import ParsedMessage, ParsedMember, ElementType
 from .base import BaseExporter
+
+
+logger = logging.getLogger(__name__)
 
 
 class HTMLExporter(BaseExporter):
@@ -23,10 +31,13 @@ class HTMLExporter(BaseExporter):
 
     streams_messages = True
     supports_incremental_messages = True
+    _emoji_asset_cache: dict[tuple[str, str], bytes | None] = {}
+    _emoji_download_disabled = False
 
     def __init__(self, output_path: Path, config: dict[str, Any]):
         super().__init__(output_path, config)
         self._image_resource_map: dict[tuple[str, str], str] = {}
+        self._system_emoji_resource_map: dict[str, list[str]] = {}
         self._stream_state: dict[str, Any] | None = None
 
     def export(
@@ -42,10 +53,8 @@ class HTMLExporter(BaseExporter):
             self._export_streaming(meta, members, messages)
             return
 
-        # 如果需要复制资源，先创建资源目录并复制图片
-        copy_resources = self.config.get('copy_resources', True)
-        if copy_resources:
-            self._prepare_resources(messages)
+        # 准备普通图片和系统表情资源
+        self._prepare_resources(messages)
 
         # 构建成员映射
         member_map = {m.platform_id: m for m in members}
@@ -305,44 +314,180 @@ class HTMLExporter(BaseExporter):
         return '.html'
 
     def _prepare_resources(self, messages: list[ParsedMessage]):
-        """准备资源文件（复制图片到 resources 目录）"""
-        # 创建资源目录
-        resources_dir = self.output_path.parent / 'resources'
-        resources_dir.mkdir(exist_ok=True)
-        images_dir = resources_dir / 'images'
-        images_dir.mkdir(exist_ok=True)
-
-        # 获取 pic_path
-        pic_path = self.config.get('pic_path')
-        if not pic_path:
-            return
-
-        pic_path_obj = Path(pic_path)
-        if not pic_path_obj.exists():
-            return
-
-        # 遍历所有消息，复制图片
+        """准备普通图片和系统表情资源。"""
         for msg in messages:
-            for elem in self._iter_resource_elements(msg.elements):
-                if elem.type == ElementType.IMAGE:
-                    self._copy_image_resource(elem.content, pic_path_obj, images_dir)
+            self._prepare_message_resources(msg)
 
     def _prepare_message_resources(self, message: ParsedMessage) -> None:
-        if not self.config.get('copy_resources', True):
-            return
         pic_path = self.config.get('pic_path')
-        if not pic_path:
-            return
-        pic_path_obj = Path(pic_path)
-        if not pic_path_obj.exists():
-            return
+        pic_path_obj = Path(pic_path) if pic_path else None
+        can_copy_images = (
+            self.config.get('copy_resources', True)
+            and pic_path_obj is not None
+            and pic_path_obj.exists()
+        )
         images_dir = self.output_path.parent / 'resources' / 'images'
-        images_dir.mkdir(parents=True, exist_ok=True)
         for element in self._iter_resource_elements(message.elements):
-            if element.type == ElementType.IMAGE:
+            if element.type == ElementType.IMAGE and can_copy_images:
+                images_dir.mkdir(parents=True, exist_ok=True)
                 self._copy_image_resource(
                     element.content, pic_path_obj, images_dir
                 )
+            elif element.type == ElementType.EMOJI:
+                self._prepare_system_emoji_resource(
+                    element.content.get('emoji_id')
+                )
+        for reaction in message.reactions:
+            self._prepare_system_emoji_resource(reaction.emoji_id)
+
+    def _prepare_system_emoji_resource(self, emoji_id) -> None:
+        """准备 APNG 和静态 PNG，供 HTML 逐级回退。"""
+        from emojis import emoji_info
+
+        info = emoji_info(emoji_id)
+        if not info or info.unicode_glyph:
+            return
+        resource_id = info.resource_id
+        if (
+            not resource_id
+            or resource_id in ('.', '..')
+            or '/' in resource_id
+            or '\\' in resource_id
+        ):
+            return
+        if resource_id in self._system_emoji_resource_map:
+            return
+
+        sources = []
+        root = self._system_emoji_root()
+        output_dir = (
+            self.output_path.parent / 'resources' / 'emojis' / resource_id
+        )
+        for image_format, archive_url in (
+            ('apng', info.apng_archive_url),
+            ('png', info.static_archive_url),
+        ):
+            local = self._find_system_emoji_file(
+                root, resource_id, image_format
+            )
+            destination = output_dir / f'{image_format}.png'
+            resolved = None
+            if local:
+                if self.config.get('copy_resources', True):
+                    try:
+                        import shutil
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        if not destination.exists():
+                            shutil.copy2(local, destination)
+                        resolved = self._relative_image_source(destination)
+                    except OSError:
+                        resolved = None
+                else:
+                    resolved = self._relative_image_source(local)
+            elif destination.is_file():
+                resolved = self._relative_image_source(destination)
+            elif archive_url:
+                member = f'{resource_id}/{image_format}/{resource_id}.png'
+                image_bytes = self._download_emoji_asset(archive_url, member)
+                if image_bytes:
+                    try:
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(image_bytes)
+                        resolved = self._relative_image_source(destination)
+                    except OSError:
+                        resolved = None
+
+            if resolved and resolved not in sources:
+                sources.append(resolved)
+
+        self._system_emoji_resource_map[resource_id] = sources
+
+    def _system_emoji_root(self) -> Path | None:
+        configured = self.config.get('emoji_path')
+        if not configured:
+            return None
+        path = Path(configured)
+        candidates = (
+            path / 'Emoji' / 'BaseEmojiSyastems' / 'EmojiSystermResource',
+            path / 'BaseEmojiSyastems' / 'EmojiSystermResource',
+            path / 'EmojiSystermResource',
+            path,
+        )
+        return next((candidate for candidate in candidates if candidate.is_dir()), None)
+
+    @staticmethod
+    def _find_system_emoji_file(
+        root: Path | None,
+        resource_id: str,
+        image_format: str,
+    ) -> Path | None:
+        if not root:
+            return None
+        image_dir = root / resource_id / image_format
+        exact = image_dir / f'{resource_id}.png'
+        if exact.is_file():
+            return exact
+        try:
+            return next(
+                path for path in sorted(image_dir.iterdir())
+                if path.is_file() and path.suffix.lower() == '.png'
+            )
+        except (OSError, StopIteration):
+            return None
+
+    @classmethod
+    def _download_emoji_asset(
+        cls,
+        archive_url: str,
+        member: str,
+    ) -> bytes | None:
+        """从 QQ 官方单表情 ZIP 中安全读取指定 PNG。"""
+        cache_key = (archive_url, member)
+        if cache_key in cls._emoji_asset_cache:
+            return cls._emoji_asset_cache[cache_key]
+        if cls._emoji_download_disabled:
+            return None
+
+        parsed = urlparse(archive_url)
+        if (
+            parsed.scheme != 'https'
+            or parsed.hostname != 'wa.qq.com'
+            or not parsed.path.endswith('.zip')
+        ):
+            cls._emoji_asset_cache[cache_key] = None
+            return None
+
+        try:
+            request = Request(archive_url, headers={
+                'User-Agent': 'QQNT_Export/3.0',
+            })
+            with urlopen(request, timeout=10) as response:
+                archive = response.read(25 * 1024 * 1024 + 1)
+            if len(archive) > 25 * 1024 * 1024:
+                raise ValueError('emoji archive is too large')
+            with zipfile.ZipFile(BytesIO(archive)) as bundle:
+                info = bundle.getinfo(member)
+                if info.file_size > 10 * 1024 * 1024:
+                    raise ValueError('emoji image is too large')
+                image = bundle.read(info)
+            if not image.startswith(b'\x89PNG\r\n\x1a\n'):
+                raise ValueError('emoji resource is not PNG')
+        except HTTPError as exc:
+            logger.debug('system emoji archive rejected: %s (%s)', archive_url, exc)
+            image = None
+        except (URLError, TimeoutError) as exc:
+            logger.warning('系统表情资源下载失败，将回退到文字: %s', exc)
+            cls._emoji_download_disabled = True
+            image = None
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
+            logger.debug('invalid system emoji archive: %s (%s)', archive_url, exc)
+            image = None
+        except Exception as exc:
+            logger.warning('系统表情资源处理失败，将回退到文字: %s', exc)
+            image = None
+
+        cls._emoji_asset_cache[cache_key] = image
+        return image
 
     def _copy_image_resource(
         self,
@@ -882,7 +1027,10 @@ class HTMLExporter(BaseExporter):
                 else:
                     parts.append(self._render_forward_unavailable(16))
 
-            elif elem.type in (ElementType.EMOJI, ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
+            elif elem.type == ElementType.EMOJI:
+                parts.append(self._render_system_emoji(elem.content))
+
+            elif elem.type in (ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
                 text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
                 parts.append(f'<div class="text">{html.escape(text)}</div>')
 
@@ -994,21 +1142,77 @@ class HTMLExporter(BaseExporter):
     def _render_reactions(self, reactions: list) -> str:
         if not reactions:
             return ''
-        from emojis import emojis
+        from emojis import emoji_info, emoji_name
 
         items = []
         for reaction in reactions:
-            try:
-                emoji_key = int(reaction.emoji_id)
-            except (TypeError, ValueError):
-                emoji_key = reaction.emoji_id
-            label = emojis.get(emoji_key, reaction.emoji_id or '表情')
+            label = emoji_name(
+                reaction.emoji_id, reaction.emoji_id or '表情'
+            )
+            info = emoji_info(reaction.emoji_id)
+            emoji_html = self._system_emoji_markup(
+                info.resource_id if info else str(reaction.emoji_id),
+                str(label),
+                info.unicode_glyph if info else None,
+                compact=True,
+            )
             self_class = ' is-self' if reaction.is_self else ''
             items.append(
                 f'<span class="reaction{self_class}">'
-                f'{html.escape(str(label))} {reaction.count}</span>'
+                f'{emoji_html}<span class="reaction-count">'
+                f'{reaction.count}</span></span>'
             )
         return f'<div class="reactions">{"".join(items)}</div>'
+
+    def _render_system_emoji(self, content: dict) -> str:
+        from emojis import emoji_info
+
+        emoji_id = content.get('emoji_id')
+        label = str(content.get('text') or '[表情]')
+        info = emoji_info(emoji_id)
+        resource_id = info.resource_id if info else str(emoji_id)
+        glyph = content.get('unicode_glyph') or (
+            info.unicode_glyph if info else None
+        )
+        markup = self._system_emoji_markup(
+            resource_id, label, glyph, compact=False
+        )
+        return f'<div class="system-emoji-message">{markup}</div>'
+
+    def _system_emoji_markup(
+        self,
+        resource_id: str,
+        label: str,
+        glyph: str | None,
+        compact: bool,
+    ) -> str:
+        safe_label = html.escape(label)
+        title = html.escape(label, quote=True)
+        size_class = ' compact' if compact else ''
+        if glyph:
+            return (
+                f'<span class="system-emoji unicode{size_class}" '
+                f'title="{title}" role="img" aria-label="{title}">'
+                f'{html.escape(glyph)}</span>'
+            )
+
+        sources = self._system_emoji_resource_map.get(resource_id, [])
+        if not sources:
+            return f'<span class="system-emoji-text">{safe_label}</span>'
+
+        primary = html.escape(sources[0], quote=True)
+        fallbacks = html.escape(
+            json.dumps(sources[1:], ensure_ascii=False), quote=True
+        )
+        return (
+            f'<span class="system-emoji{size_class}" title="{title}">'
+            f'<img class="system-emoji-image" src="{primary}" alt="{title}" '
+            f'loading="lazy" draggable="false" '
+            f'data-fallback-srcs="{fallbacks}" '
+            f'onerror="useEmojiFallback(this)">'
+            f'<span class="system-emoji-text" hidden>{safe_label}</span>'
+            '</span>'
+        )
 
     @staticmethod
     def _render_application_card(content: dict) -> str:
@@ -1693,6 +1897,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         .reaction {{
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
             padding: 2px 7px;
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -1704,6 +1911,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .reaction.is-self {{
             border-color: var(--bubble-self);
             color: var(--bubble-self);
+        }}
+
+        .system-emoji-message {{
+            display: flex;
+            align-items: center;
+            min-height: 36px;
+        }}
+
+        .system-emoji {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
+        }}
+
+        .system-emoji-image {{
+            width: 36px;
+            height: 36px;
+            object-fit: contain;
+        }}
+
+        .system-emoji.compact .system-emoji-image {{
+            width: 18px;
+            height: 18px;
+        }}
+
+        .system-emoji.unicode {{
+            font-size: 32px;
+            line-height: 1;
+        }}
+
+        .system-emoji.unicode.compact {{
+            font-size: 16px;
+        }}
+
+        .system-emoji-text {{
+            white-space: nowrap;
         }}
 
         .bot-buttons {{
@@ -3046,6 +3290,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             image.src = fallback;
             const button = image.closest('.image-button');
             if (button) button.dataset.src = fallback;
+        }}
+
+        function useEmojiFallback(image) {{
+            const fallbacks = JSON.parse(image.dataset.fallbackSrcs || '[]');
+            const fallback = fallbacks.shift();
+            if (fallback) {{
+                image.dataset.fallbackSrcs = JSON.stringify(fallbacks);
+                image.src = fallback;
+                return;
+            }}
+            image.hidden = true;
+            const text = image.nextElementSibling;
+            if (text?.classList.contains('system-emoji-text')) text.hidden = false;
         }}
 
         function showImage(src) {{

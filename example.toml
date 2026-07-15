@@ -22,6 +22,9 @@ copy_resources = true
 # 可选：QQ NT 的 nt_data/avatar 目录（也可填写 nt_data 目录）
 # 配置后 HTML 会优先复制本地头像；embed_avatars=true 时 ChatLab 会嵌入 Data URL
 avatar_path = ""
+# 可选：QQ NT 的 nt_data 或 EmojiSystermResource 目录
+# 留空时 HTML 会从 emoji.db 的 QQ 官方资源包按需下载系统表情
+emoji_path = ""
 embed_avatars = false
 
 # ============================================================================

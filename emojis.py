@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+
+
 emojis = {4: '得意', 5: '流泪', 8: '睡', 9: '大哭', 10: '尴尬', 12: '调皮', 14: '微笑', 16: '酷', 21: '可爱',
           23: '傲慢', 24: '饥饿', 25: '困', 26: '惊恐', 27: '流汗', 28: '憨笑', 29: '悠闲', 30: '奋斗', 32: '疑问',
           33: '嘘', 34: '晕', 38: '敲打', 39: '再见', 41: '发抖', 42: '爱情', 43: '跳跳', 49: '拥抱', 53: '蛋糕',
@@ -21,3 +24,84 @@ emojis = {4: '得意', 5: '流泪', 8: '睡', 9: '大哭', 10: '尴尬', 12: '�
           128293: '🔥 火', 128513: '😁 呲牙', 128514: '😂 激动', 128516: '😄 高兴', 128522: '😊 嘿嘿', 128524: '😌 羞涩',
           128527: '😏 哼哼', 128530: '😒 不屑', 128531: '😓 汗', 128532: '😔 失落', 128536: '😘 飞吻', 128538: '😚 亲亲',
           128540: '😜 淘气', 128541: '😝 吐舌', 128557: '😭 大哭', 128560: '😰 紧张', 128563: '😳 瞪眼'}
+
+
+_DEFAULT_EMOJIS = emojis.copy()
+_emoji_infos = {}
+
+
+@dataclass(frozen=True)
+class EmojiInfo:
+    resource_id: str
+    name: str
+    unicode_glyph: str | None = None
+    emoji_type: int | None = None
+    static_archive_url: str | None = None
+    apng_archive_url: str | None = None
+
+
+def _normalize_emoji_id(emoji_id):
+    """统一普通数字 ID，同时保留 Unicode 表情字符 ID。"""
+    if isinstance(emoji_id, int):
+        return emoji_id
+    value = str(emoji_id)
+    return int(value) if value.isdecimal() else value
+
+
+def _default_info(emoji_id, name) -> EmojiInfo:
+    glyph = None
+    if isinstance(emoji_id, int) and emoji_id > 255:
+        candidate = chr(emoji_id)
+        if str(name).startswith(candidate):
+            glyph = candidate
+    return EmojiInfo(str(emoji_id), str(name), unicode_glyph=glyph)
+
+
+def configure_emojis(database_emojis) -> None:
+    """用 emoji.db 刷新名称与资源信息，静态表作为回退。"""
+    emojis.clear()
+    emojis.update(_DEFAULT_EMOJIS)
+    _emoji_infos.clear()
+    _emoji_infos.update({
+        emoji_id: _default_info(emoji_id, name)
+        for emoji_id, name in _DEFAULT_EMOJIS.items()
+    })
+
+    for emoji_id, item in database_emojis.items():
+        description = item.get('description')
+        name = str(description).removeprefix('/')
+        if not name:
+            continue
+
+        key = _normalize_emoji_id(emoji_id)
+        unicode_id = item.get('unicode_id') or None
+        try:
+            glyph = chr(int(unicode_id)) if unicode_id else None
+        except (TypeError, ValueError, OverflowError):
+            unicode_id = None
+            glyph = None
+        info = EmojiInfo(
+            resource_id=str(emoji_id),
+            name=name,
+            unicode_glyph=glyph,
+            emoji_type=item.get('emoji_type'),
+            static_archive_url=item.get('static_archive_url') or None,
+            apng_archive_url=item.get('apng_archive_url') or None,
+        )
+        aliases = {key}
+        if unicode_id:
+            aliases.add(int(unicode_id))
+            aliases.add(glyph)
+        for alias in aliases:
+            emojis[alias] = name
+            _emoji_infos[alias] = info
+
+
+def emoji_name(emoji_id, default=None):
+    """按消息元素或贴表情中的 ID 查询系统表情名称。"""
+    return emojis.get(_normalize_emoji_id(emoji_id), default)
+
+
+def emoji_info(emoji_id) -> EmojiInfo | None:
+    """查询系统表情名称、Unicode 字符与资源包信息。"""
+    return _emoji_infos.get(_normalize_emoji_id(emoji_id))

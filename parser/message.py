@@ -9,6 +9,7 @@ from typing import Optional
 import logging
 
 import element_pb2
+from emojis import configure_emojis
 
 from db import DatabaseManager
 from db.models import (
@@ -48,6 +49,7 @@ class MessageParser:
             dbman: 数据库管理器
         """
         self.dbman = dbman
+        configure_emojis(dbman.system_emojis())
         # “我”（当前登录账号）的成员信息缓存
         self._self_member: Optional[ParsedMember] = None
         self._self_member_resolved = False

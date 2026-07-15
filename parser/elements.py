@@ -201,12 +201,14 @@ def parse_video(element) -> ParsedElement:
 @ElementParser.register(6)
 def parse_emoji(element) -> ParsedElement:
     """解析表情消息"""
-    # 尝试从 emojis.py 获取表情名称
-    from emojis import emojis
+    from emojis import emoji_info, emoji_name
 
+    info = emoji_info(element.emojiId)
     emoji_text = element.emojiText
-    if not emoji_text and element.emojiId:
-        emoji_text = emojis.get(element.emojiId, f"[表情:{element.emojiId}]")
+    if not emoji_text:
+        emoji_text = emoji_name(
+            element.emojiId, f"[表情:{element.emojiId}]"
+        )
 
     return ParsedElement(
         type=ElementType.EMOJI,
@@ -214,6 +216,11 @@ def parse_emoji(element) -> ParsedElement:
             'emoji_id': element.emojiId,
             'text': emoji_text,
             'raw_text': element.emojiText,  # 原始外显文字（未经查表回退）
+            'unicode_glyph': info.unicode_glyph if info else None,
+            'static_archive_url': (
+                info.static_archive_url if info else None
+            ),
+            'apng_archive_url': info.apng_archive_url if info else None,
             'sub_type': element.subType,
             'extended_description': element.faceExtDesc or None,
             'super_category': element.superEmojiCategory or None,
