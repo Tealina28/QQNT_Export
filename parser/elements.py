@@ -166,6 +166,10 @@ def parse_voice(element) -> ParsedElement:
             'size': element.fileSize,
             'file_path': element.filePath,
             'file_token': element.fileToken,
+            'md5': element.md5HexStr.hex() if element.md5HexStr else None,
+            'content_hash': (
+                element.contentHash.hex() if element.contentHash else None
+            ),
             'duration': element.pttDuration,
             'voice_changed': element.voiceChanged,
             'is_ai_voice': element.isAiVoice,

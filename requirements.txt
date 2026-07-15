@@ -4,3 +4,4 @@ SQLAlchemy
 tqdm
 jinja2
 lxml
+pysilk-mod>=1.6.4,<2

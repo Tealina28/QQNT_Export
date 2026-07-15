@@ -14,6 +14,8 @@ a = Analysis(
         'sqlalchemy.sql.default_comparator',
         'lxml.etree',
         'lxml._elementpath',
+        'pysilk',
+        'pysilk.coder',
     ],
     hookspath=[],
     hooksconfig={},

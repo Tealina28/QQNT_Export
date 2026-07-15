@@ -38,6 +38,8 @@ class HTMLExporter(BaseExporter):
         super().__init__(output_path, config)
         self._image_resource_map: dict[tuple[str, str], str] = {}
         self._system_emoji_resource_map: dict[str, list[str]] = {}
+        self._voice_resource_map: dict[str, str] = {}
+        self._voice_resource_attempted: set[str] = set()
         self._stream_state: dict[str, Any] | None = None
 
     def export(
@@ -327,7 +329,9 @@ class HTMLExporter(BaseExporter):
             and pic_path_obj.exists()
         )
         images_dir = self.output_path.parent / 'resources' / 'images'
-        for element in self._iter_resource_elements(message.elements):
+        for element, timestamp in self._iter_timed_resource_elements(
+            message.elements, message.timestamp
+        ):
             if element.type == ElementType.IMAGE and can_copy_images:
                 images_dir.mkdir(parents=True, exist_ok=True)
                 self._copy_image_resource(
@@ -337,8 +341,47 @@ class HTMLExporter(BaseExporter):
                 self._prepare_system_emoji_resource(
                     element.content.get('emoji_id')
                 )
+            elif element.type == ElementType.VOICE:
+                self._prepare_voice_resource(element.content, timestamp)
         for reaction in message.reactions:
             self._prepare_system_emoji_resource(reaction.emoji_id)
+
+    def _prepare_voice_resource(self, content: dict, timestamp: int) -> None:
+        """定位 PTT 缓存并解码为 HTML 可播放的 WAV。"""
+        from parser.voice import (
+            decode_silk_to_wav,
+            find_ptt_file,
+            is_wav_file,
+            voice_resource_key,
+        )
+
+        if not self.config.get('silk_transcode', True):
+            return
+        key = voice_resource_key(content)
+        if key in self._voice_resource_attempted:
+            return
+        self._voice_resource_attempted.add(key)
+        destination = (
+            self.output_path.parent / 'resources' / 'voices' / f'{key}.wav'
+        )
+        if is_wav_file(destination):
+            relative = self._relative_image_source(destination)
+            if relative:
+                self._voice_resource_map[key] = relative
+            return
+
+        source = find_ptt_file(
+            self.config.get('ptt_path'),
+            int(timestamp or 0),
+            content.get('filename'),
+            content.get('file_path'),
+        )
+        if not source:
+            return
+        if decode_silk_to_wav(source, destination):
+            relative = self._relative_image_source(destination)
+            if relative:
+                self._voice_resource_map[key] = relative
 
     def _prepare_system_emoji_resource(self, emoji_id) -> None:
         """准备 APNG 和静态 PNG，供 HTML 逐级回退。"""
@@ -605,16 +648,26 @@ class HTMLExporter(BaseExporter):
         except (OSError, ValueError):
             return None
 
-    def _iter_resource_elements(self, elements: list):
-        """递归遍历正文、引用缓存和合并转发中的资源元素。"""
+    def _iter_timed_resource_elements(
+        self,
+        elements: list,
+        timestamp: int,
+    ):
+        """递归遍历资源元素，并保留其所属消息的时间戳。"""
         for element in elements:
-            yield element
+            yield element, timestamp
             if element.type == ElementType.QUOTE:
-                yield from self._iter_resource_elements(
-                    element.content.get('quoted_elements', [])
+                quote_timestamp = (
+                    element.content.get('quoted_timestamp') or timestamp
+                )
+                yield from self._iter_timed_resource_elements(
+                    element.content.get('quoted_elements', []),
+                    quote_timestamp,
                 )
             for message in element.content.get('forward_messages', []):
-                yield from self._iter_resource_elements(message.elements)
+                yield from self._iter_timed_resource_elements(
+                    message.elements, message.timestamp
+                )
 
     def _build_avatar_map(self, members: list[ParsedMember]) -> dict[str, str]:
         """构建头像映射，优先使用本地缓存并回退成员头像 URL。"""
@@ -990,16 +1043,7 @@ class HTMLExporter(BaseExporter):
                 )
 
             elif elem.type == ElementType.VOICE:
-                text = elem.content.get('text')
-                duration = elem.content.get('duration') or 0
-                voice_type = 'AI 语音' if elem.content.get('is_ai_voice') else '语音'
-                label = text or '未转写语音'
-                if duration:
-                    label = f'{label} · {duration}秒'
-                parts.append(
-                    f'<div class="media-chip"><span>{voice_type}</span>'
-                    f'{html.escape(label)}</div>'
-                )
+                parts.append(self._render_voice(elem.content))
 
             elif elem.type == ElementType.VIDEO:
                 filename = html.escape(elem.content.get('filename', ''))
@@ -1138,6 +1182,39 @@ class HTMLExporter(BaseExporter):
                 )
 
         return ''.join(parts) if parts else '<div class="text">[空消息]</div>'
+
+    def _render_voice(self, content: dict) -> str:
+        from parser.voice import voice_resource_key
+
+        text = content.get('text')
+        duration = content.get('duration') or 0
+        voice_type = 'AI 语音' if content.get('is_ai_voice') else '语音'
+        details = []
+        if duration:
+            details.append(f'{duration}秒')
+        if content.get('voice_changed'):
+            details.append('变声')
+        label = ' · '.join(details) or '未标注时长'
+        source = self._voice_resource_map.get(voice_resource_key(content))
+        transcript = (
+            f'<small>{html.escape(str(text))}</small>' if text else ''
+        )
+        if not source:
+            fallback = text or label
+            return (
+                f'<div class="media-chip"><span>{voice_type}</span>'
+                f'{html.escape(str(fallback))}</div>'
+            )
+
+        safe_source = html.escape(source, quote=True)
+        return (
+            '<div class="voice-card">'
+            f'<span class="voice-label">{voice_type}</span>'
+            f'<audio controls preload="none" src="{safe_source}">'
+            f'{html.escape(voice_type)}</audio>'
+            f'<span class="voice-duration">{html.escape(label)}</span>'
+            f'{transcript}</div>'
+        )
 
     def _render_reactions(self, reactions: list) -> str:
         if not reactions:
@@ -2630,6 +2707,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--accent);
             font-size: 11px;
             font-weight: 650;
+        }}
+        .voice-card {{
+            display: grid;
+            min-width: 250px;
+            max-width: 360px;
+            grid-template-columns: auto minmax(150px, 1fr) auto;
+            align-items: center;
+            gap: 8px;
+            margin: 3px 0;
+        }}
+        .voice-card audio {{
+            width: 100%;
+            height: 34px;
+        }}
+        .voice-label {{
+            padding: 2px 6px;
+            border-radius: 5px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 650;
+            white-space: nowrap;
+        }}
+        .voice-duration {{
+            color: var(--text-secondary);
+            font-size: 11px;
+            white-space: nowrap;
+        }}
+        .voice-card small {{
+            grid-column: 1 / -1;
+            color: var(--text-secondary);
+            font-size: 12px;
         }}
         .wallet-card {{
             display: grid;
