@@ -1177,7 +1177,7 @@ class HTMLExporter(BaseExporter):
         markup = self._system_emoji_markup(
             resource_id, label, glyph, compact=False
         )
-        return f'<div class="system-emoji-message">{markup}</div>'
+        return f'<span class="system-emoji-message">{markup}</span>'
 
     def _system_emoji_markup(
         self,
@@ -1914,9 +1914,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         .system-emoji-message {{
-            display: flex;
+            display: inline-flex;
             align-items: center;
             min-height: 36px;
+            vertical-align: middle;
         }}
 
         .system-emoji {{
