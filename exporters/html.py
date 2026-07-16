@@ -375,6 +375,8 @@ class HTMLExporter(BaseExporter):
             int(timestamp or 0),
             content.get('filename'),
             content.get('file_path'),
+            content.get('md5'),
+            content.get('content_hash'),
         )
         if not source:
             return

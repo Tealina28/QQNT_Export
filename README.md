@@ -17,7 +17,7 @@
 - **离线头像**：ChatLab 输出成员/群头像，HTML 可复制 QQ NT 本地头像缓存
 - **跨设备消息**：导出 `dataline_msg_table` 中“我的手机/电脑/平板”同步记录
 - **QQ 系统表情**：读取可选的 `emoji.db`，HTML 优先显示 APNG、静态图并最终回退文字
-- **语音播放**：从 `nt_data/Ptt` 定位 QQ SILK `.amr`，解码为 WAV 后供 HTML 离线播放
+- **语音播放**：兼容标准、扁平 MD5 和旧式 PTT 缓存，解码 QQ SILK 为 WAV 供 HTML 播放
 
 ## 📦 导出格式
 

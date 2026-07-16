@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 SILK_MAGIC = b'#!SILK_V3'
 MAX_VOICE_BYTES = 100 * 1024 * 1024
+VOICE_SUFFIXES = ('.amr', '.slk', '.silk')
 
 
 def resolve_ptt_root(ptt_path: str | Path | None) -> Path | None:
@@ -52,14 +54,51 @@ def _case_insensitive_file(directory: Path, filename: str) -> Path | None:
         return None
 
 
+@lru_cache(maxsize=16)
+def _recursive_ptt_index(root: Path) -> dict[str, Path]:
+    """为扁平、YYYYMM/日期等非标准 PTT 布局建立一次性文件名索引。"""
+    index = {}
+    try:
+        for directory, _, files in os.walk(root, followlinks=False):
+            base = Path(directory)
+            for filename in files:
+                if Path(filename).suffix.lower() not in VOICE_SUFFIXES:
+                    continue
+                index.setdefault(filename.casefold(), base / filename)
+    except OSError:
+        pass
+    return index
+
+
+def _lookup_names(
+    filename: str,
+    md5: str | None,
+    content_hash: str | None,
+) -> tuple[str, ...]:
+    """生成原文件名、替代扩展名和哈希文件名候选。"""
+    candidates = []
+    if filename:
+        candidates.append(filename)
+        stem = Path(filename).stem
+        candidates.extend(f'{stem}{suffix}' for suffix in VOICE_SUFFIXES)
+    for value in (md5, content_hash):
+        normalized = str(value or '').strip().lower()
+        if not normalized:
+            continue
+        candidates.extend((normalized, *(f'{normalized}{suffix}' for suffix in VOICE_SUFFIXES)))
+    return tuple(dict.fromkeys(candidate.casefold() for candidate in candidates))
+
+
 @lru_cache(maxsize=4096)
 def find_ptt_file(
     ptt_path: str | Path | None,
     timestamp: int,
     filename: str | None,
     file_path: str | None = None,
+    md5: str | None = None,
+    content_hash: str | None = None,
 ) -> Path | None:
-    """按显式路径或消息月份在 Ptt/<YYYY-MM>/Ori 中定位语音。"""
+    """按显式路径、标准月份目录或递归哈希索引定位语音。"""
     if file_path:
         explicit = Path(file_path)
         if explicit.is_file():
@@ -67,20 +106,30 @@ def find_ptt_file(
 
     root = resolve_ptt_root(ptt_path)
     name = _safe_basename(filename)
-    if not root or not name or not timestamp:
+    if not root:
         return None
 
-    try:
-        months = tuple(_relative_month(int(timestamp), delta) for delta in (0, -1, 1))
-    except (OSError, OverflowError, ValueError):
-        return None
-    for month in months:
-        candidate = _case_insensitive_file(
-            root / month / 'Ori',
-            name,
-        )
-        if candidate:
-            return candidate
+    if name and timestamp:
+        try:
+            months = tuple(
+                _relative_month(int(timestamp), delta)
+                for delta in (0, -1, 1)
+            )
+        except (OSError, OverflowError, ValueError):
+            months = ()
+        for month in months:
+            candidate = _case_insensitive_file(
+                root / month / 'Ori',
+                name,
+            )
+            if candidate:
+                return candidate
+
+    index = _recursive_ptt_index(root)
+    for candidate in _lookup_names(name, md5, content_hash):
+        matched = index.get(candidate)
+        if matched and matched.is_file():
+            return matched
     return None
 
 
