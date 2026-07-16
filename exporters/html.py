@@ -982,8 +982,19 @@ class HTMLExporter(BaseExporter):
             sender_name,
             self._extract_text_content(msg.elements),
         )).lower()
+        visible_elements = [
+            element for element in msg.elements
+            if element.type != ElementType.QUOTE
+            and not element.content.get('recovered_message_body')
+        ]
+        voice_only = (
+            not quoted_html
+            and len(visible_elements) == 1
+            and visible_elements[0].type == ElementType.VOICE
+        )
+        voice_class = ' voice-only' if voice_only else ''
         return f'''
-<div class="message-entry message-group {'is-self' if is_self else 'is-other'}" id="msg-{html.escape(msg.msg_id)}" data-message-seq="{msg.seq}" data-message-timestamp="{msg.timestamp}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
+<div class="message-entry message-group {'is-self' if is_self else 'is-other'}{voice_class}" id="msg-{html.escape(msg.msg_id)}" data-message-seq="{msg.seq}" data-message-timestamp="{msg.timestamp}" data-search="{html.escape(search_text, quote=True)}" data-sender="{html.escape(msg.sender_uid, quote=True)}">
     <div class="avatar">{avatar_html}</div>
     <div class="message-wrapper">
         <div class="meta">
@@ -1190,31 +1201,57 @@ class HTMLExporter(BaseExporter):
 
         text = content.get('text')
         duration = content.get('duration') or 0
-        voice_type = 'AI 语音' if content.get('is_ai_voice') else '语音'
-        details = []
-        if duration:
-            details.append(f'{duration}秒')
-        if content.get('voice_changed'):
-            details.append('变声')
-        label = ' · '.join(details) or '未标注时长'
+        duration_label = f'{duration}秒' if duration else '--'
         source = self._voice_resource_map.get(voice_resource_key(content))
-        transcript = (
-            f'<small>{html.escape(str(text))}</small>' if text else ''
-        )
         if not source:
-            fallback = text or label
+            fallback = text or (f'语音 {duration_label}' if duration else '语音')
             return (
-                f'<div class="media-chip"><span>{voice_type}</span>'
+                '<div class="media-chip"><span>语音</span>'
                 f'{html.escape(str(fallback))}</div>'
             )
 
+        waveform = content.get('waveform') or ''
+        try:
+            samples = list(bytes.fromhex(waveform))
+        except (TypeError, ValueError):
+            samples = []
+        bar_count = max(12, min(28, 12 + int(duration or 0) // 2))
+        if samples:
+            bars = []
+            for index in range(bar_count):
+                start = index * len(samples) // bar_count
+                end = max(start + 1, (index + 1) * len(samples) // bar_count)
+                bars.append(max(samples[start:end]))
+        else:
+            seed = sum(ord(char) for char in voice_resource_key(content))
+            bars = [18 + ((seed + index * 29 + index * index * 7) % 70)
+                    for index in range(bar_count)]
+        peak = max(bars, default=1)
+        bars_html = ''.join(
+            '<i style="--voice-level:'
+            f'{max(22, round(value / peak * 100))}%"></i>'
+            for value in bars
+        )
+        badges = []
+        if content.get('is_ai_voice'):
+            badges.append('<span class="voice-badge">AI</span>')
+        if content.get('voice_changed'):
+            badges.append('<span class="voice-badge">变声</span>')
+        badges_html = ''.join(badges)
+        transcript = (
+            '<div class="voice-transcript">'
+            f'{html.escape(str(text))}</div>' if text else ''
+        )
         safe_source = html.escape(source, quote=True)
         return (
             '<div class="voice-card">'
-            f'<span class="voice-label">{voice_type}</span>'
-            f'<audio controls preload="none" src="{safe_source}">'
-            f'{html.escape(voice_type)}</audio>'
-            f'<span class="voice-duration">{html.escape(label)}</span>'
+            '<button type="button" class="voice-player" '
+            f'data-src="{safe_source}" aria-label="播放语音">'
+            '<span class="voice-play-icon" aria-hidden="true"></span>'
+            f'<span class="voice-waveform">{bars_html}</span>'
+            f'<span class="voice-duration">{duration_label}</span>'
+            '</button>'
+            f'{badges_html}'
             f'{transcript}</div>'
         )
 
@@ -2710,37 +2747,109 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 11px;
             font-weight: 650;
         }}
+        .voice-only .bubble {{ padding: 0; overflow: hidden; }}
         .voice-card {{
-            display: grid;
-            min-width: 250px;
-            max-width: 360px;
-            grid-template-columns: auto minmax(150px, 1fr) auto;
+            display: flex;
+            position: relative;
+            min-width: 190px;
+            max-width: 330px;
+            flex-wrap: wrap;
             align-items: center;
-            gap: 8px;
-            margin: 3px 0;
+            gap: 6px;
+            margin: 0;
         }}
-        .voice-card audio {{
+        .voice-player {{
+            display: grid;
             width: 100%;
-            height: 34px;
+            min-width: 190px;
+            min-height: 52px;
+            grid-template-columns: 32px minmax(96px, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 13px;
+            border: 0;
+            border-radius: inherit;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font: inherit;
         }}
-        .voice-label {{
-            padding: 2px 6px;
-            border-radius: 5px;
-            background: var(--accent-soft);
-            color: var(--accent);
-            font-size: 11px;
-            font-weight: 650;
-            white-space: nowrap;
+        .voice-player:focus-visible {{
+            outline: 2px solid var(--accent);
+            outline-offset: -3px;
         }}
+        .voice-play-icon {{
+            display: grid;
+            width: 30px;
+            height: 30px;
+            place-items: center;
+            border-radius: 50%;
+            background: currentColor;
+        }}
+        .voice-play-icon::before {{
+            content: '';
+            width: 0;
+            height: 0;
+            margin-left: 2px;
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+            border-left: 8px solid var(--bubble-other);
+        }}
+        .is-self .voice-play-icon::before {{ border-left-color: var(--bubble-self); }}
+        .voice-player.is-playing .voice-play-icon::before {{
+            width: 7px;
+            height: 10px;
+            margin: 0;
+            border: 0;
+            border-right: 3px solid var(--bubble-other);
+            border-left: 3px solid var(--bubble-other);
+        }}
+        .is-self .voice-player.is-playing .voice-play-icon::before {{
+            border-right-color: var(--bubble-self);
+            border-left-color: var(--bubble-self);
+        }}
+        .voice-waveform {{
+            display: flex;
+            height: 24px;
+            align-items: center;
+            gap: 2px;
+        }}
+        .voice-waveform i {{
+            width: 2px;
+            height: max(4px, calc(var(--voice-level) * .24));
+            border-radius: 2px;
+            background: currentColor;
+            opacity: .38;
+            transition: opacity 100ms ease, transform 100ms ease;
+        }}
+        .voice-waveform i.is-played {{ opacity: 1; transform: scaleX(1.18); }}
         .voice-duration {{
-            color: var(--text-secondary);
-            font-size: 11px;
+            min-width: 28px;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            opacity: .72;
+            text-align: right;
             white-space: nowrap;
         }}
-        .voice-card small {{
-            grid-column: 1 / -1;
-            color: var(--text-secondary);
+        .voice-badge {{
+            margin: 0 0 7px 10px;
+            padding: 1px 5px;
+            border: 1px solid currentColor;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 650;
+            line-height: 16px;
+            opacity: .7;
+        }}
+        .voice-badge + .voice-badge {{ margin-left: 0; }}
+        .voice-transcript {{
+            width: 100%;
+            margin: 0 12px 10px;
+            padding-top: 8px;
+            border-top: 1px solid currentColor;
             font-size: 12px;
+            line-height: 1.5;
+            opacity: .7;
         }}
         .wallet-card {{
             display: grid;
@@ -3430,6 +3539,69 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.body.style.overflow = '';
         }}
 
+        let activeVoice = null;
+        function resetVoice(player) {{
+            if (!player) return;
+            player.classList.remove('is-playing');
+            player.setAttribute('aria-label', '播放语音');
+            player.querySelectorAll('.voice-waveform i').forEach(
+                bar => bar.classList.remove('is-played')
+            );
+        }}
+
+        function toggleVoice(player) {{
+            if (!player._audio) {{
+                player._audio = new Audio(player.dataset.src);
+                player._audio.preload = 'metadata';
+                player._audio.addEventListener('timeupdate', () => {{
+                    const audio = player._audio;
+                    const bars = player.querySelectorAll('.voice-waveform i');
+                    const progress = audio.duration ? audio.currentTime / audio.duration : 0;
+                    bars.forEach((bar, index) => {{
+                        bar.classList.toggle('is-played', index / bars.length < progress);
+                    }});
+                    const duration = player.querySelector('.voice-duration');
+                    if (duration && audio.duration && !audio.paused) {{
+                        duration.textContent = Math.max(0, Math.ceil(
+                            audio.duration - audio.currentTime
+                        )) + '秒';
+                    }}
+                }});
+                player._audio.addEventListener('ended', () => {{
+                    player._audio.currentTime = 0;
+                    const duration = player.querySelector('.voice-duration');
+                    if (duration) duration.textContent = Math.ceil(
+                        player._audio.duration || 0
+                    ) + '秒';
+                    resetVoice(player);
+                    if (activeVoice === player) activeVoice = null;
+                }});
+                player._audio.addEventListener('error', () => {{
+                    resetVoice(player);
+                    player.disabled = true;
+                    player.setAttribute('aria-label', '语音加载失败');
+                    const duration = player.querySelector('.voice-duration');
+                    if (duration) duration.textContent = '失败';
+                    if (activeVoice === player) activeVoice = null;
+                }});
+            }}
+            if (activeVoice && activeVoice !== player) {{
+                activeVoice._audio.pause();
+                resetVoice(activeVoice);
+            }}
+            if (player._audio.paused) {{
+                activeVoice = player;
+                player._audio.play().then(() => {{
+                    player.classList.add('is-playing');
+                    player.setAttribute('aria-label', '暂停语音');
+                }}).catch(() => resetVoice(player));
+            }} else {{
+                player._audio.pause();
+                resetVoice(player);
+                activeVoice = null;
+            }}
+        }}
+
         function resolveQuoteRecord(reference) {{
             const directId = reference.dataset.targetMessageId;
             if (directId) {{
@@ -3505,6 +3677,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         document.addEventListener('click', event => {{
+            const voicePlayer = event.target.closest('.voice-player');
+            if (voicePlayer) {{
+                event.preventDefault();
+                toggleVoice(voicePlayer);
+                return;
+            }}
             const forwardToggle = event.target.closest(
                 '.forward-header[data-forward-toggle]'
             );
