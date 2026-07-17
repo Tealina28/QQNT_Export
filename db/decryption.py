@@ -16,10 +16,12 @@ import shutil
 import sqlite3
 import stat
 import tempfile
+import time
 import uuid
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 
 SQLITE_HEADER = b"SQLite format 3\x00"
@@ -35,6 +37,8 @@ GPRO_DATABASE_PREFIXES = ("gpro_v1-6_u_", "en_gpro_v1-6_u_")
 
 _TOKEN_PATTERN = re.compile(rb"[A-Za-z0-9]{8}\Z")
 _UID_FRAGMENT_PATTERN = re.compile(r"u_[A-Za-z0-9_-]+")
+_WINDOWS_CLEANUP_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8)
+_WINDOWS_RETRYABLE_CLEANUP_ERRORS = frozenset({5, 32, 33})
 logger = logging.getLogger(__name__)
 
 
@@ -84,7 +88,8 @@ class _SourceState:
 class _DatabaseFailure:
     name: str
     stage: Literal["检查", "依赖", "复制", "解密", "验证", "暂存"]
-    reason: Exception
+    category: str
+    reason: str
     token: str | None = None
 
 
@@ -135,11 +140,16 @@ def decrypt_database_directory(
     if not isinstance(overwrite, bool):
         raise ValidationError("overwrite 必须是布尔值")
 
-    source_state, databases, failures, skipped_count = (
+    source_state, databases, inspection_failures, skipped_count = (
         _inspect_source_databases(source)
     )
-    for failure in failures:
+    failed_count = len(inspection_failures)
+    for failure in inspection_failures:
         _log_database_failure(failure, normalized_uid)
+    # Failure records contain strings only, but releasing the list here also
+    # keeps per-database diagnostics out of the long-running decrypt loop.
+    inspection_failures.clear()
+    failure = None
 
     sqlcipher = None
     if any(database.kind == "encrypted" for database in databases):
@@ -151,18 +161,19 @@ def decrypt_database_directory(
                 if database.kind == "plaintext":
                     plaintext_databases.append(database)
                     continue
-                failure = _DatabaseFailure(
+                failure = _capture_database_failure(
                     database.path.name,
                     "依赖",
                     dependency_error,
                     database.token,
                 )
-                failures.append(failure)
+                failed_count += 1
                 _log_database_failure(failure, normalized_uid)
             databases = plaintext_databases
+            failure = None
 
     if not databases:
-        _log_database_summary(0, len(failures), skipped_count)
+        _log_database_summary(0, failed_count, skipped_count)
         raise DatabaseDecryptionError(
             "没有数据库处理成功；未发布解密输出目录"
         )
@@ -190,6 +201,7 @@ def decrypt_database_directory(
         for database in databases:
             output_partial = stage / f".{database.path.name}.partial"
             output_final = stage / database.path.name
+            failure = None
             failure_stage: Literal[
                 "复制", "解密", "验证", "暂存"
             ] = "复制" if database.kind == "plaintext" else "解密"
@@ -212,26 +224,35 @@ def decrypt_database_directory(
                 os.replace(output_partial, output_final)
                 successful_databases.append(database)
             except Exception as exc:
-                _remove_failed_database_artifacts(output_partial)
-                failure = _DatabaseFailure(
+                # Capture only strings while the exception is active.  Keeping
+                # traceback-bearing exceptions alive can retain SQLite file
+                # handles and make the partial undeletable on Windows.
+                failure = _capture_database_failure(
                     database.path.name,
                     failure_stage,
                     exc,
                     database.token,
                 )
-                failures.append(failure)
+
+            if failure is not None:
+                failed_count += 1
                 _log_database_failure(failure, normalized_uid)
+                # Run cleanup after leaving the except block so its exception
+                # and traceback no longer pin database connections.
+                _remove_failed_database_artifacts(output_partial)
+                failure = None
 
         _assert_batch_unchanged(source_state)
         if not successful_databases:
-            _log_database_summary(0, len(failures), skipped_count)
+            _log_database_summary(0, failed_count, skipped_count)
             raise DatabaseDecryptionError(
                 "没有数据库处理成功；未发布解密输出目录"
             )
-        try:
-            shutil.rmtree(work)
-        except OSError as cleanup_exc:
-            raise PublishError(f"无法清理解密过程文件：{work}") from cleanup_exc
+        cleanup_error = _remove_directory_with_retries(work)
+        if cleanup_error is not None:
+            raise PublishError(
+                f"无法清理解密过程文件：{work}"
+            ) from cleanup_error
         _write_manifest(stage, successful_databases)
         _assert_batch_unchanged(source_state)
         _publish_directory(
@@ -242,7 +263,7 @@ def decrypt_database_directory(
         )
         _log_database_summary(
             len(successful_databases),
-            len(failures),
+            failed_count,
             skipped_count,
         )
     except BaseException as exc:
@@ -325,7 +346,9 @@ def _inspect_source_databases(
             file_stat = path.lstat()
         except OSError as exc:
             if _is_supported_database_name(path.name):
-                failures.append(_DatabaseFailure(path.name, "检查", exc))
+                failures.append(
+                    _capture_database_failure(path.name, "检查", exc)
+                )
             continue
 
         source_entries.append(
@@ -355,7 +378,9 @@ def _inspect_source_databases(
                 _SourceDatabase(path, "encrypted", snapshot, token)
             )
         except Exception as exc:
-            failures.append(_DatabaseFailure(path.name, "检查", exc))
+            failures.append(
+                _capture_database_failure(path.name, "检查", exc)
+            )
 
     source_state = _SourceState(
         source=source,
@@ -452,6 +477,7 @@ def _decrypt_wrapped_database(
     key = _derive_key(uid, database.token)
 
     connection = None
+    cursor = None
     attached = False
     try:
         connection = sqlcipher.connect(str(encrypted_body))
@@ -480,23 +506,31 @@ def _decrypt_wrapped_database(
         cursor.execute("DETACH DATABASE plaintext")
         attached = False
         connection.commit()
-        cursor.close()
     except Exception as exc:
         raise DatabaseDecryptionError(
             f"解密数据库 {database.path.name} 失败，请检查 QUID、数据库头和版本"
         ) from exc
     finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
         if connection is not None:
             if attached:
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass
                 try:
                     connection.execute("DETACH DATABASE plaintext")
                 except Exception:
                     pass
-            connection.close()
-        try:
-            encrypted_body.unlink(missing_ok=True)
-        except OSError:
-            pass
+            try:
+                connection.close()
+            except Exception:
+                pass
+        _remove_file_with_retries(encrypted_body)
 
     try:
         with destination.open("rb+") as output:
@@ -537,7 +571,10 @@ def _validate_plaintext_database(path: Path) -> None:
                 )
 
         uri = f"{path.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(uri, uri=True) as connection:
+        # sqlite3.Connection.__exit__ only commits or rolls back; it does not
+        # close the handle.  closing() is required so Windows can rename or
+        # delete the validated partial immediately on both success and error.
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
             connection.execute("PRAGMA query_only = ON")
             connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
     except DatabaseDecryptionError:
@@ -556,12 +593,44 @@ def _remove_failed_database_artifacts(output_partial: Path) -> None:
         output_partial.with_name(f"{output_partial.name}-shm"),
     )
     for artifact in artifacts:
-        try:
-            artifact.unlink(missing_ok=True)
-        except OSError as exc:
+        cleanup_error = _remove_file_with_retries(artifact)
+        if cleanup_error is not None:
             raise PublishError(
                 "无法清理失败数据库的暂存文件"
-            ) from exc
+            ) from cleanup_error
+
+
+def _remove_file_with_retries(path: Path) -> OSError | None:
+    return _run_cleanup_with_retries(
+        lambda: path.unlink(missing_ok=True)
+    )
+
+
+def _remove_directory_with_retries(path: Path) -> OSError | None:
+    return _run_cleanup_with_retries(lambda: shutil.rmtree(path))
+
+
+def _run_cleanup_with_retries(
+    operation: Callable[[], None],
+) -> OSError | None:
+    """Retry transient Windows sharing/lock failures for cleanup only."""
+    for attempt in range(len(_WINDOWS_CLEANUP_RETRY_DELAYS) + 1):
+        try:
+            operation()
+            return None
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            retryable = (
+                getattr(exc, "winerror", None)
+                in _WINDOWS_RETRYABLE_CLEANUP_ERRORS
+            )
+            if not retryable or attempt == len(
+                _WINDOWS_CLEANUP_RETRY_DELAYS
+            ):
+                return exc
+            time.sleep(_WINDOWS_CLEANUP_RETRY_DELAYS[attempt])
+    raise AssertionError("unreachable cleanup retry state")
 
 
 def _log_database_failure(failure: _DatabaseFailure, uid: str) -> None:
@@ -569,7 +638,7 @@ def _log_database_failure(failure: _DatabaseFailure, uid: str) -> None:
         "数据库 %s 处理失败（阶段=%s，类别=%s）：%s",
         _redact_failure_label(failure, uid),
         failure.stage,
-        _failure_category(failure.reason),
+        failure.category,
         _redact_failure_reason(failure, uid),
     )
 
@@ -596,8 +665,25 @@ def _failure_category(reason: Exception) -> str:
     return "处理异常"
 
 
+def _capture_database_failure(
+    name: str,
+    stage: Literal["检查", "依赖", "复制", "解密", "验证", "暂存"],
+    reason: Exception,
+    token: str | None = None,
+) -> _DatabaseFailure:
+    """Snapshot a failure without retaining its traceback or local handles."""
+    category = _failure_category(reason)
+    return _DatabaseFailure(
+        name=name,
+        stage=stage,
+        category=category,
+        reason=str(reason) or category,
+        token=token,
+    )
+
+
 def _redact_failure_reason(failure: _DatabaseFailure, uid: str) -> str:
-    reason = str(failure.reason) or _failure_category(failure.reason)
+    reason = failure.reason or failure.category
     safe_name = _redact_failure_label(failure, uid)
     reason = reason.replace(failure.name, safe_name)
     for secret in _failure_secrets(failure, uid):
@@ -859,12 +945,9 @@ def _read_managed_destination(
 
 
 def _remove_stage_directory(stage: Path) -> OSError | None:
-    if not stage.exists():
-        return None
-    try:
-        shutil.rmtree(stage)
-    except OSError as exc:
-        return exc
+    cleanup_error = _remove_directory_with_retries(stage)
+    if cleanup_error is not None:
+        return cleanup_error
     if stage.exists():
         return OSError("目录在清理后仍然存在")
     return None
@@ -933,15 +1016,17 @@ def _publish_directory(
         raise
 
     try:
-        shutil.rmtree(backup)
+        cleanup_error = _remove_directory_with_retries(backup)
     except BaseException as cleanup_exc:
         # The new batch is already complete and published.  Keep the backup
         # rather than risking loss of either complete directory.
         message = f"新解密目录已完整发布，但旧目录无法删除：{backup}"
-        if isinstance(cleanup_exc, Exception):
-            raise PublishError(message) from cleanup_exc
         cleanup_exc.add_note(message)
         raise
+    if cleanup_error is not None:
+        raise PublishError(
+            f"新解密目录已完整发布，但旧目录无法删除：{backup}"
+        ) from cleanup_error
 
 
 def _rollback_new_directory(stage: Path, destination: Path) -> OSError | None:
