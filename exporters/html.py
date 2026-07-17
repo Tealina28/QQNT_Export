@@ -1183,24 +1183,7 @@ class HTMLExporter(BaseExporter):
                 )
 
             elif elem.type == ElementType.FEED:
-                title = elem.content.get('title')
-                subtitle = elem.content.get('subtitle')
-                content = elem.content.get('content')
-
-                feed_parts = []
-                if title:
-                    feed_parts.append(f'<strong>{html.escape(title)}</strong>')
-                if content:
-                    feed_parts.append(html.escape(content))
-                if subtitle:
-                    feed_parts.append(html.escape(subtitle))
-
-                if feed_parts:
-                    parts.append(
-                        f'<div class="feed-card">{"<br>".join(feed_parts)}</div>'
-                    )
-                else:
-                    parts.append('<div class="placeholder-card">动态</div>')
+                parts.append(self._render_feed_card(elem.content))
 
             else:
                 # 其他类型暂时用占位符
@@ -1391,6 +1374,60 @@ class HTMLExporter(BaseExporter):
             safe_url = html.escape(target_url, quote=True)
             return f'<a class="ark-card ark-{kind}" href="{safe_url}" target="_blank" rel="noreferrer">{body}</a>'
         return f'<div class="ark-card ark-{kind}">{body}</div>'
+
+    @classmethod
+    def _render_feed_card(cls, content: dict) -> str:
+        """渲染动态消息卡片中的文字、封面和来源 Logo。"""
+        title = content.get('title') or ''
+        description = content.get('content') or ''
+        subtitle = content.get('subtitle') or ''
+        cover_url = cls._resolve_image_url(content.get('cover_url'), None)
+        logo_url = cls._resolve_image_url(content.get('logo_url'), None)
+
+        cover = ''
+        if cover_url:
+            safe_cover = html.escape(cover_url, quote=True)
+            cover = (
+                f'<img class="feed-cover" src="{safe_cover}" '
+                'alt="动态封面" loading="lazy" referrerpolicy="no-referrer" '
+                'onerror="this.hidden=true">'
+            )
+
+        logo = ''
+        if logo_url:
+            safe_logo = html.escape(logo_url, quote=True)
+            logo = (
+                f'<img class="feed-logo" src="{safe_logo}" '
+                'alt="" loading="lazy" referrerpolicy="no-referrer" '
+                'onerror="this.hidden=true">'
+            )
+
+        details = []
+        if title:
+            details.append(
+                f'<strong class="feed-title">{html.escape(title)}</strong>'
+            )
+        if description:
+            details.append(
+                f'<span class="feed-content">{html.escape(description)}</span>'
+            )
+        if logo or subtitle:
+            details.append(
+                f'<div class="feed-meta">{logo}'
+                f'{f"<small>{html.escape(subtitle)}</small>" if subtitle else ""}'
+                '</div>'
+            )
+
+        if not cover and not details:
+            return '<div class="placeholder-card">动态</div>'
+        body = (
+            f'<div class="feed-body">{"".join(details)}</div>'
+            if details else ''
+        )
+        return (
+            f'<div class="feed-card">{cover}'
+            f'{body}</div>'
+        )
 
     def _render_image(self, content: dict) -> str:
         """渲染图片"""
@@ -2990,12 +3027,51 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .ark-announcement {{ border-left: 3px solid var(--accent); }}
         .feed-card, .placeholder-card {{
-            padding: 10px 11px;
             border: 1px solid var(--border);
             border-radius: 9px;
             background: rgba(127, 127, 127, .07);
         }}
-        .placeholder-card {{ color: var(--text-secondary); font-size: 13px; }}
+        .feed-card {{
+            display: grid;
+            min-width: 230px;
+            max-width: 360px;
+            overflow: hidden;
+        }}
+        .feed-cover {{
+            display: block;
+            width: 100%;
+            max-height: 220px;
+            object-fit: cover;
+        }}
+        .feed-body {{
+            display: grid;
+            gap: 5px;
+            padding: 10px 11px;
+        }}
+        .feed-title {{ font-size: 14px; line-height: 1.4; }}
+        .feed-content, .feed-meta small {{
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }}
+        .feed-meta {{
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }}
+        .feed-logo {{
+            width: 24px;
+            height: 24px;
+            flex: 0 0 auto;
+            border-radius: 6px;
+            object-fit: cover;
+        }}
+        .placeholder-card {{
+            padding: 10px 11px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }}
         .forward-container {{
             min-width: 260px;
             padding: 12px;
@@ -3143,7 +3219,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .avatar {{ width: 34px; height: 34px; }}
             .message-wrapper {{ max-width: 82%; }}
             .bubble {{ font-size: 14px; }}
-            .attachment-card, .forward-container {{ min-width: 0; }}
+            .attachment-card, .feed-card, .forward-container {{ min-width: 0; }}
             .date-divider {{ top: 156px; }}
         }}
     </style>
