@@ -434,7 +434,18 @@ class DatabaseManager:
 
     def profile_info(self, uid):
         model = self._models["profile_info"]["profile_info_v6"]
-        return self.session.query(model).filter_by(uid = uid).first()
+        engine = self._engines.get("profile_info")
+        if not engine:
+            return None
+        try:
+            if not inspect(engine).has_table(model.__tablename__):
+                return None
+            return self.session.query(model).filter_by(uid=uid).first()
+        except SQLAlchemyError:
+            logger.warning(
+                "读取用户资料数据库失败，使用消息字段降级"
+            )
+            return None
 
     @staticmethod
     def _nonempty_group_value(value):

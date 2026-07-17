@@ -181,6 +181,13 @@ def prepare_runtime_config(
         uid=uid,
         overwrite=overwrite,
     )
+    decrypted_db_path = Path(decrypted_db_path)
+    message_db_path = decrypted_db_path / 'nt_msg.db'
+    if not message_db_path.is_file() or message_db_path.is_symlink():
+        raise ValueError(
+            '解密结果中缺少普通文件 nt_msg.db；其他成功解密的数据库已发布，'
+            '但无法继续聊天记录导出'
+        )
     logging.info('数据库解密完成: %s', decrypted_db_path)
     runtime_config['db_path'] = str(decrypted_db_path)
     return runtime_config

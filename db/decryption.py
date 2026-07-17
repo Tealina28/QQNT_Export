@@ -34,6 +34,7 @@ MANIFEST_VERSION = 1
 GPRO_DATABASE_PREFIXES = ("gpro_v1-6_u_", "en_gpro_v1-6_u_")
 
 _TOKEN_PATTERN = re.compile(rb"[A-Za-z0-9]{8}\Z")
+_UID_FRAGMENT_PATTERN = re.compile(r"u_[A-Za-z0-9_-]+")
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +67,28 @@ class _SourceDatabase:
 
 
 @dataclass(frozen=True)
+class _SourceEntry:
+    path: Path
+    mode: int
+    snapshot: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class _SourceState:
+    source: Path
+    database_names: frozenset[str]
+    entries: tuple[_SourceEntry, ...]
+
+
+@dataclass(frozen=True)
+class _DatabaseFailure:
+    name: str
+    stage: Literal["检查", "依赖", "复制", "解密", "验证", "暂存"]
+    reason: Exception
+    token: str | None = None
+
+
+@dataclass(frozen=True)
 class _DestinationState:
     directory_snapshot: tuple[int, int, int, int] | None
     entries: tuple[tuple[str, tuple[int, int, int, int]], ...] = ()
@@ -78,13 +101,14 @@ def decrypt_database_directory(
     uid: str,
     overwrite: bool = False,
 ) -> Path:
-    """Decrypt supported top-level ``*.db`` files as one atomic batch.
+    """Decrypt supported top-level ``*.db`` files with partial success.
 
     Plain SQLite databases are copied unchanged.  Android QQNT wrapped
     SQLCipher databases are unwrapped and exported as ordinary SQLite files.
     Known unsupported ``gpro_v1-6_u_*.db`` files are skipped explicitly.
-    The destination directory is published only after every database has
-    succeeded and passed a lightweight readability check.
+    Per-database failures are logged and omitted; the destination is published
+    when at least one database succeeds.  Directory journals, source snapshot,
+    and destination publication safety remain batch-wide requirements.
 
     Args:
         source_path: Directory copied from Android QQNT's ``nt_db`` storage.
@@ -98,11 +122,9 @@ def decrypt_database_directory(
         The absolute path of the published plaintext database directory.
 
     Raises:
-        ValidationError: If the inputs, wrapper header, token, or journal state
-            are unsafe or unsupported.
-        DependencyError: If encrypted input is present but SQLCipher is not
-            installed.
-        DatabaseDecryptionError: If any database fails to decrypt or validate.
+        ValidationError: If a batch-wide input, journal, or source snapshot
+            check is unsafe or invalid.
+        DatabaseDecryptionError: If no database can be decrypted or validated.
         PublishError: If the staged directory cannot be published safely.
     """
 
@@ -113,12 +135,39 @@ def decrypt_database_directory(
     if not isinstance(overwrite, bool):
         raise ValidationError("overwrite 必须是布尔值")
 
-    databases = _inspect_source_databases(source)
-    destination_state = _prepare_destination_parent(destination, overwrite)
+    source_state, databases, failures, skipped_count = (
+        _inspect_source_databases(source)
+    )
+    for failure in failures:
+        _log_database_failure(failure, normalized_uid)
 
     sqlcipher = None
     if any(database.kind == "encrypted" for database in databases):
-        sqlcipher = _load_sqlcipher()
+        try:
+            sqlcipher = _load_sqlcipher()
+        except DependencyError as dependency_error:
+            plaintext_databases = []
+            for database in databases:
+                if database.kind == "plaintext":
+                    plaintext_databases.append(database)
+                    continue
+                failure = _DatabaseFailure(
+                    database.path.name,
+                    "依赖",
+                    dependency_error,
+                    database.token,
+                )
+                failures.append(failure)
+                _log_database_failure(failure, normalized_uid)
+            databases = plaintext_databases
+
+    if not databases:
+        _log_database_summary(0, len(failures), skipped_count)
+        raise DatabaseDecryptionError(
+            "没有数据库处理成功；未发布解密输出目录"
+        )
+
+    destination_state = _prepare_destination_parent(destination, overwrite)
 
     try:
         stage = Path(
@@ -137,9 +186,13 @@ def decrypt_database_directory(
             work.mkdir(mode=0o700)
         except OSError as setup_exc:
             raise PublishError(f"无法初始化解密暂存目录：{stage}") from setup_exc
+        successful_databases: list[_SourceDatabase] = []
         for database in databases:
             output_partial = stage / f".{database.path.name}.partial"
             output_final = stage / database.path.name
+            failure_stage: Literal[
+                "复制", "解密", "验证", "暂存"
+            ] = "复制" if database.kind == "plaintext" else "解密"
             try:
                 if database.kind == "plaintext":
                     _copy_plaintext_database(database, output_partial)
@@ -152,28 +205,45 @@ def decrypt_database_directory(
                         normalized_uid,
                         sqlcipher,
                     )
+                failure_stage = "验证"
                 os.chmod(output_partial, 0o600)
                 _validate_plaintext_database(output_partial)
+                failure_stage = "暂存"
                 os.replace(output_partial, output_final)
-            except DecryptionError:
-                raise
+                successful_databases.append(database)
             except Exception as exc:
-                raise DatabaseDecryptionError(
-                    f"处理数据库 {database.path.name} 失败：{exc}"
-                ) from exc
+                _remove_failed_database_artifacts(output_partial)
+                failure = _DatabaseFailure(
+                    database.path.name,
+                    failure_stage,
+                    exc,
+                    database.token,
+                )
+                failures.append(failure)
+                _log_database_failure(failure, normalized_uid)
 
-        _assert_batch_unchanged(databases)
+        _assert_batch_unchanged(source_state)
+        if not successful_databases:
+            _log_database_summary(0, len(failures), skipped_count)
+            raise DatabaseDecryptionError(
+                "没有数据库处理成功；未发布解密输出目录"
+            )
         try:
             shutil.rmtree(work)
         except OSError as cleanup_exc:
             raise PublishError(f"无法清理解密过程文件：{work}") from cleanup_exc
-        _write_manifest(stage, databases)
-        _assert_batch_unchanged(databases)
+        _write_manifest(stage, successful_databases)
+        _assert_batch_unchanged(source_state)
         _publish_directory(
             stage,
             destination,
             overwrite,
             destination_state,
+        )
+        _log_database_summary(
+            len(successful_databases),
+            len(failures),
+            skipped_count,
         )
     except BaseException as exc:
         cleanup_error = _remove_stage_directory(stage)
@@ -225,22 +295,20 @@ def _validate_uid(uid: str) -> str:
     return normalized
 
 
-def _inspect_source_databases(source: Path) -> list[_SourceDatabase]:
+def _inspect_source_databases(
+    source: Path,
+) -> tuple[_SourceState, list[_SourceDatabase], list[_DatabaseFailure], int]:
     try:
         entries = list(source.iterdir())
-        candidates = sorted(
-            (
-                entry
-                for entry in entries
-                if _is_supported_database_name(entry.name)
-            ),
+        all_databases = sorted(
+            (entry for entry in entries if entry.name.endswith(".db")),
             key=lambda entry: entry.name,
         )
     except OSError as exc:
         raise ValidationError(f"无法列出数据库目录：{source}") from exc
     _reject_directory_active_journals(source, entries)
     skipped_gpro_count = sum(
-        _is_gpro_database_name(entry.name) for entry in entries
+        _is_gpro_database_name(path.name) for path in all_databases
     )
     if skipped_gpro_count:
         logger.warning(
@@ -248,33 +316,53 @@ def _inspect_source_databases(source: Path) -> list[_SourceDatabase]:
             "en_gpro_v1-6_u_*.db（共 %s 个）",
             skipped_gpro_count,
         )
-    if not candidates:
-        raise ValidationError(f"目录中没有可处理的顶层 .db 文件：{source}")
 
     databases: list[_SourceDatabase] = []
-    for path in candidates:
+    failures: list[_DatabaseFailure] = []
+    source_entries: list[_SourceEntry] = []
+    for path in all_databases:
         try:
             file_stat = path.lstat()
         except OSError as exc:
-            raise ValidationError(f"无法读取数据库文件信息：{path}") from exc
-        if not stat.S_ISREG(file_stat.st_mode):
-            raise ValidationError(f"顶层 .db 项不是普通文件：{path}")
-
-        try:
-            with path.open("rb") as source_file:
-                header = source_file.read(QQNT_HEADER_SIZE)
-        except OSError as exc:
-            raise ValidationError(f"无法读取数据库文件：{path}") from exc
-
-        snapshot = _stat_snapshot(file_stat)
-        if header.startswith(SQLITE_HEADER):
-            databases.append(_SourceDatabase(path, "plaintext", snapshot))
+            if _is_supported_database_name(path.name):
+                failures.append(_DatabaseFailure(path.name, "检查", exc))
             continue
 
-        token = _parse_qqnt_header(path, header, file_stat.st_size)
-        databases.append(_SourceDatabase(path, "encrypted", snapshot, token))
+        source_entries.append(
+            _SourceEntry(
+                path=path,
+                mode=file_stat.st_mode,
+                snapshot=_stat_snapshot(file_stat),
+            )
+        )
+        if not _is_supported_database_name(path.name):
+            continue
 
-    return databases
+        try:
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise ValidationError(
+                    f"顶层 .db 项不是普通文件：{path.name}"
+                )
+            with path.open("rb") as source_file:
+                header = source_file.read(QQNT_HEADER_SIZE)
+            snapshot = _stat_snapshot(file_stat)
+            if header.startswith(SQLITE_HEADER):
+                databases.append(_SourceDatabase(path, "plaintext", snapshot))
+                continue
+
+            token = _parse_qqnt_header(path, header, file_stat.st_size)
+            databases.append(
+                _SourceDatabase(path, "encrypted", snapshot, token)
+            )
+        except Exception as exc:
+            failures.append(_DatabaseFailure(path.name, "检查", exc))
+
+    source_state = _SourceState(
+        source=source,
+        database_names=frozenset(path.name for path in all_databases),
+        entries=tuple(source_entries),
+    )
+    return source_state, databases, failures, skipped_gpro_count
 
 
 def _parse_qqnt_header(path: Path, header: bytes, file_size: int) -> str:
@@ -460,34 +548,129 @@ def _validate_plaintext_database(path: Path) -> None:
         ) from exc
 
 
-def _assert_batch_unchanged(databases: list[_SourceDatabase]) -> None:
-    _reject_directory_active_journals(databases[0].path.parent)
-    _assert_database_set_unchanged(databases)
-    for database in databases:
-        _assert_source_unchanged(database)
-    _assert_database_set_unchanged(databases)
-    _reject_directory_active_journals(databases[0].path.parent)
+def _remove_failed_database_artifacts(output_partial: Path) -> None:
+    artifacts = (
+        output_partial,
+        output_partial.with_name(f"{output_partial.name}-journal"),
+        output_partial.with_name(f"{output_partial.name}-wal"),
+        output_partial.with_name(f"{output_partial.name}-shm"),
+    )
+    for artifact in artifacts:
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError as exc:
+            raise PublishError(
+                "无法清理失败数据库的暂存文件"
+            ) from exc
 
 
-def _assert_database_set_unchanged(databases: list[_SourceDatabase]) -> None:
-    source = databases[0].path.parent
-    expected = {database.path.name for database in databases}
+def _log_database_failure(failure: _DatabaseFailure, uid: str) -> None:
+    logger.warning(
+        "数据库 %s 处理失败（阶段=%s，类别=%s）：%s",
+        _redact_failure_label(failure, uid),
+        failure.stage,
+        _failure_category(failure.reason),
+        _redact_failure_reason(failure, uid),
+    )
+
+
+def _log_database_summary(success: int, failed: int, skipped: int) -> None:
+    log = logger.warning if failed or skipped or success == 0 else logger.info
+    log(
+        "数据库逐库处理汇总：成功 %s 个，失败 %s 个，跳过 %s 个",
+        success,
+        failed,
+        skipped,
+    )
+
+
+def _failure_category(reason: Exception) -> str:
+    if isinstance(reason, DependencyError):
+        return "依赖不可用"
+    if isinstance(reason, ValidationError):
+        return "输入校验"
+    if isinstance(reason, DatabaseDecryptionError):
+        return "数据库解密"
+    if isinstance(reason, (OSError, sqlite3.Error)):
+        return "文件或数据库I/O"
+    return "处理异常"
+
+
+def _redact_failure_reason(failure: _DatabaseFailure, uid: str) -> str:
+    reason = str(failure.reason) or _failure_category(failure.reason)
+    safe_name = _redact_failure_label(failure, uid)
+    reason = reason.replace(failure.name, safe_name)
+    for secret in _failure_secrets(failure, uid):
+        if secret:
+            reason = reason.replace(secret, "*")
+    reason = _UID_FRAGMENT_PATTERN.sub("u_*", reason)
+    return _safe_log_text(reason, 320)
+
+
+def _redact_failure_label(failure: _DatabaseFailure, uid: str) -> str:
+    label = failure.name
+    for secret in _failure_secrets(failure, uid):
+        if secret:
+            label = label.replace(secret, "*")
+    label = _UID_FRAGMENT_PATTERN.sub("u_*", label)
+    return _safe_log_text(label, 120)
+
+
+def _failure_secrets(failure: _DatabaseFailure, uid: str) -> tuple[str, ...]:
+    secrets = [uid, hashlib.md5(uid.encode("utf-8")).hexdigest()]
+    if failure.token:
+        secrets.extend((failure.token, _derive_key(uid, failure.token)))
+    return tuple(secrets)
+
+
+def _safe_log_text(value: str, limit: int) -> str:
+    sanitized = "".join(
+        character if character.isprintable() else "?"
+        for character in value
+    )
+    if len(sanitized) <= limit:
+        return sanitized
+    return f"{sanitized[: limit - 1]}…"
+
+
+def _assert_batch_unchanged(source_state: _SourceState) -> None:
+    _reject_directory_active_journals(source_state.source)
+    _assert_database_set_unchanged(source_state)
+    for source_entry in source_state.entries:
+        try:
+            current = source_entry.path.lstat()
+        except OSError as exc:
+            raise ValidationError(
+                "处理期间有源数据库消失或无法读取"
+            ) from exc
+        if (
+            current.st_mode != source_entry.mode
+            or _stat_snapshot(current) != source_entry.snapshot
+        ):
+            raise ValidationError(
+                "处理期间有源数据库发生变化"
+            )
+    _assert_database_set_unchanged(source_state)
+    _reject_directory_active_journals(source_state.source)
+
+
+def _assert_database_set_unchanged(source_state: _SourceState) -> None:
     try:
         current = {
             entry.name
-            for entry in source.iterdir()
-            if _is_supported_database_name(entry.name)
+            for entry in source_state.source.iterdir()
+            if entry.name.endswith(".db")
         }
     except OSError as exc:
-        raise ValidationError(f"无法重新检查数据库目录：{source}") from exc
-    if current != expected:
-        added = sorted(current - expected)
-        removed = sorted(expected - current)
+        raise ValidationError("无法重新检查源数据库目录") from exc
+    if current != source_state.database_names:
+        added = sorted(current - source_state.database_names)
+        removed = sorted(source_state.database_names - current)
         changes = []
         if added:
-            changes.append(f"新增 {', '.join(added)}")
+            changes.append(f"新增 {len(added)} 个")
         if removed:
-            changes.append(f"移除 {', '.join(removed)}")
+            changes.append(f"移除 {len(removed)} 个")
         raise ValidationError(
             f"处理期间顶层 .db 文件集合发生变化：{'; '.join(changes)}"
         )
@@ -526,7 +709,7 @@ def _reject_active_journals(database_path: Path) -> None:
                         "请关闭 QQ 后重新复制数据库目录"
                     )
                 raise ValidationError(
-                    f"检测到非空{label}文件 {journal_path.name}；"
+                    f"检测到非空{label}文件；"
                     "请关闭 QQ 后重新复制数据库目录"
                 )
         except OSError as exc:
@@ -534,7 +717,7 @@ def _reject_active_journals(database_path: Path) -> None:
                 raise ValidationError(
                     f"无法检查跳过的 gpro 数据库{label}"
                 ) from exc
-            raise ValidationError(f"无法检查日志文件：{journal_path}") from exc
+            raise ValidationError(f"无法检查数据库{label}文件") from exc
 
 
 def _reject_directory_active_journals(
