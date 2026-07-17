@@ -4,7 +4,9 @@ QQNT Export - 重构版
 解析和导出解耦的 QQNT 聊天记录导出工具。
 """
 
+import hashlib
 import logging
+import re
 import tomllib
 from pathlib import Path
 from sys import argv
@@ -22,6 +24,13 @@ from exporters import EXPORTER_MAP
 
 
 DEFAULT_STREAM_BATCH_SIZE = 1000
+MAX_OUTPUT_STEM_BYTES = 240
+MAX_IDENTIFIER_LABEL_BYTES = 64
+WINDOWS_RESERVED_FILENAMES = {
+    'CON', 'PRN', 'AUX', 'NUL',
+    *(f'COM{index}' for index in range(1, 10)),
+    *(f'LPT{index}' for index in range(1, 10)),
+}
 
 
 class TqdmLoggingHandler(logging.Handler):
@@ -43,12 +52,37 @@ logging.basicConfig(
 
 
 def sanitize_filename(filename) -> str:
-    """清理文件名中的非法字符"""
-    import re
-    illegal_chars = r'[<>:"/\\|?*]'
-    if isinstance(filename, int):
-        return str(filename)
-    return re.sub(illegal_chars, '_', str(filename))
+    """生成跨平台安全且长度受限的单个文件名组件。"""
+    return _sanitize_filename(filename, MAX_OUTPUT_STEM_BYTES)
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    """按 UTF-8 字节数截断字符串，不切断多字节字符。"""
+    if len(value.encode('utf-8')) <= max_bytes:
+        return value
+    return value.encode('utf-8')[:max_bytes].decode('utf-8', errors='ignore')
+
+
+def _sanitize_filename(filename, max_bytes: int) -> str:
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '_', str(filename))
+    value = value.strip(' .')
+    value = _truncate_utf8(value, max_bytes).rstrip(' .')
+    if not value:
+        value = 'conversation'
+    if value.split('.', 1)[0].upper() in WINDOWS_RESERVED_FILENAMES:
+        value = f'_{value}'
+    return _truncate_utf8(value, max_bytes).rstrip(' .') or 'conversation'
+
+
+def conversation_output_stem(display_name, stable_id) -> str:
+    """组合可读会话名与稳定标识，避免清理及大小写规则造成覆盖。"""
+    raw_id = str(stable_id)
+    identifier = _sanitize_filename(raw_id, MAX_IDENTIFIER_LABEL_BYTES)
+    identifier_hash = hashlib.sha256(raw_id.encode('utf-8')).hexdigest()[:16]
+    suffix = f'__{identifier}-{identifier_hash}'
+    display_budget = MAX_OUTPUT_STEM_BYTES - len(suffix.encode('utf-8'))
+    display = _sanitize_filename(display_name, max(1, display_budget))
+    return f'{display}{suffix}'
 
 
 def create_output_dirs(
@@ -93,17 +127,19 @@ def export_query(
     output_formats: list[str],
     output_dir: Path,
     output_name: str,
+    conversation_id: str,
     config: dict,
 ):
     """将查询导出为指定格式；纯流式格式不物化消息列表。"""
     exporters = []
+    output_stem = conversation_output_stem(output_name, conversation_id)
     for format_name in output_formats:
         exporter_cls = EXPORTER_MAP.get(format_name)
         if not exporter_cls:
             logging.warning(f"未知的导出格式: {format_name}")
             continue
         extension = exporter_cls(output_dir, config).get_file_extension()
-        output_path = output_dir / f"{sanitize_filename(output_name)}{extension}"
+        output_path = output_dir / f"{output_stem}{extension}"
         exporters.append((exporter_cls(output_path, config), output_path))
 
     batch_size = max(1, int(config.get(
@@ -217,7 +253,7 @@ def export_c2c_conversation(
 
     export_query(
         query, parser.parse_c2c_message, meta, members, output_formats,
-        output_dir, conversation_name, config,
+        output_dir, conversation_name, uid, config,
     )
 
 
@@ -273,7 +309,7 @@ def export_group_conversation(
 
     export_query(
         query, parser.parse_group_message, meta, members, output_formats,
-        output_dir, conversation_name, config,
+        output_dir, conversation_name, str(group_num), config,
     )
 
 
@@ -308,7 +344,7 @@ def export_dataline_conversation(
 
     export_query(
         query, parser.parse_dataline_message, meta, members, output_formats,
-        output_dir, conversation_name, config,
+        output_dir, conversation_name, partition_uid, config,
     )
 
 
