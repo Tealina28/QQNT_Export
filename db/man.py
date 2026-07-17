@@ -193,4 +193,30 @@ class DatabaseManager:
             .filter_by(group_number = group_num) \
             .first()
 
+    def group_owner_uid(self, group_num) -> str | None:
+        """从群详情读取群主 UID；旧库缺表或缺列时正常降级。"""
+        model = self._models["group_info"]["group_detail_info_ver1"]
+        engine = self._engines.get("group_info")
+        if not engine:
+            return None
+        try:
+            inspector = inspect(engine)
+            if not inspector.has_table(model.__tablename__):
+                return None
+            columns = {
+                column["name"]
+                for column in inspector.get_columns(model.__tablename__)
+            }
+            if not {"60001", "60002"} <= columns:
+                return None
+            owner_uid = (
+                self.session.query(model.owner_uid)
+                .filter(model.group_number == group_num)
+                .scalar()
+            )
+        except SQLAlchemyError as exc:
+            logger.warning("读取群主 UID 失败，按普通成员导出: %s", exc)
+            return None
+        return str(owner_uid) if owner_uid else None
+
 from .models import *

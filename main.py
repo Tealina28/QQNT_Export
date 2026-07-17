@@ -288,8 +288,11 @@ def export_group_conversation(
 
     logging.info(f"开始导出群聊: {conversation_name}")
 
-    # 获取群成员信息
-    members = parser.get_all_group_members(group_num)
+    # 只收集本次实际发送者，并补入群主和当前账号。
+    owner_uid = dbman.group_owner_uid(group_num)
+    members = parser.get_group_conversation_members(
+        group_num, query, owner_uid
+    )
 
     # 获取当前账号信息（用于判断"我"）
     self_member = parser.get_self_member()

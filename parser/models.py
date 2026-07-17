@@ -9,6 +9,14 @@ from enum import IntEnum
 from typing import Optional
 
 
+def normalize_sender_id(sender_uid, sender_num, msg_id) -> str:
+    """按消息模型的降级规则生成可关联的发送者 ID。"""
+    if sender_uid:
+        return str(sender_uid)
+    fallback = sender_num if sender_num is not None else msg_id
+    return str(fallback or 'unknown')
+
+
 class ElementType(IntEnum):
     """消息元素类型枚举"""
     TEXT = 1
@@ -92,11 +100,9 @@ class ParsedMessage:
     sender_card: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if self.sender_uid:
-            self.sender_uid = str(self.sender_uid)
-            return
-        fallback = self.sender_num if self.sender_num is not None else self.msg_id
-        self.sender_uid = str(fallback or 'unknown')
+        self.sender_uid = normalize_sender_id(
+            self.sender_uid, self.sender_num, self.msg_id
+        )
 
     def is_group_message(self) -> bool:
         """判断是否为群聊消息"""

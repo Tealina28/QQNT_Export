@@ -12,7 +12,7 @@ from .protobuf import sanitize_protobuf
 
 __all__ = [
     "C2cMessage", "DatalineMessage", "GroupMessage", "UidMapping",
-    "ProfileInfo", "GroupList", "GroupMember", "BaseSysEmoji",
+    "ProfileInfo", "GroupList", "GroupDetail", "GroupMember", "BaseSysEmoji",
 ]
 
 profile_map = {}
@@ -311,6 +311,17 @@ class GroupList(Base):
     UNK_50: Mapped[int] = mapped_column("60298")
     UNK_51: Mapped[int] = mapped_column("60252")
     UNK_52: Mapped[int] = mapped_column("60344")
+
+
+@DatabaseManager.register_model("group_info")
+class GroupDetail(Base):
+    """群详情中导出所需的稳定字段。"""
+    __tablename__ = "group_detail_info_ver1"
+
+    group_number: Mapped[int] = mapped_column("60001", primary_key=True)
+    name: Mapped[str | None] = mapped_column("60007")
+    remark: Mapped[str | None] = mapped_column("60026")
+    owner_uid: Mapped[str | None] = mapped_column("60002")
 
 
 @DatabaseManager.register_model("group_info")

@@ -9,6 +9,7 @@ from typing import Optional
 import logging
 
 import element_pb2
+from sqlalchemy.exc import SQLAlchemyError
 from emojis import configure_emojis
 
 from db import DatabaseManager
@@ -32,11 +33,14 @@ from .models import (
     ParsedMember,
     ParsedMessage,
     ParsedReaction,
+    normalize_sender_id,
 )
 from .elements import ElementParser, _parse_forward_cache, _quote_reference
 
 
 logger = logging.getLogger(__name__)
+GROUP_MEMBER_QUERY_CHUNK_SIZE = 900
+GROUP_SENDER_SCAN_BATCH_SIZE = 1000
 
 
 class MessageParser:
@@ -332,35 +336,208 @@ class MessageParser:
         Returns:
             ParsedMember 对象，如果找不到返回 None
         """
-        from db.models import GroupMember
-
         member = (
             self.dbman.session.query(GroupMember)
             .filter(GroupMember.group_number == group_num)
             .filter(GroupMember.uid == uid)
             .first()
         )
-
-        return self._parse_group_member(member)
-
-    @staticmethod
-    def _parse_group_member(member) -> Optional[ParsedMember]:
-        """将群成员 ORM 转为统一模型，忽略 QQNT 的空占位行。"""
         if not member or not member.uid:
             return None
-
-        return ParsedMember(
-            platform_id=member.uid,
-            qq_num=member.qq_num,
-            nickname=member.nickname or "",
-            group_nickname=member.group_name_card,
-            is_owner=member.manager_flag == 2,
-            is_admin=member.manager_flag == 1,
-            avatar=public_user_avatar_url(member.qq_num),
+        return self._build_group_member(
+            str(uid), member, {}, self.dbman.group_owner_uid(group_num)
         )
 
+    @staticmethod
+    def _collect_group_senders(query) -> dict[str, dict]:
+        """轻量预扫实际发送者，并保留消息行中的最新可用资料。"""
+        model = query.column_descriptions[0]['entity']
+        rows = (
+            query.order_by(None)
+            .with_entities(
+                model.id,
+                model.sender_uid,
+                model.sender_num,
+                model.nickname,
+                model.group_name_card,
+                model.time,
+            )
+            .yield_per(GROUP_SENDER_SCAN_BATCH_SIZE)
+        )
+        senders: dict[str, dict] = {}
+        for msg_id, sender_uid, sender_num, nickname, card, timestamp in rows:
+            platform_id = normalize_sender_id(sender_uid, sender_num, msg_id)
+            current_key = (timestamp or 0, msg_id or 0)
+            sender = senders.setdefault(platform_id, {
+                'lookup_uid': str(sender_uid) if sender_uid else None,
+                'qq_num': sender_num or 0,
+                'nickname': nickname or '',
+                'group_nickname': card or '',
+                '_qq_latest': current_key if sender_num else (-1, -1),
+                '_nickname_latest': current_key if nickname else (-1, -1),
+                '_card_latest': current_key if card else (-1, -1),
+            })
+            if sender_uid and not sender['lookup_uid']:
+                sender['lookup_uid'] = str(sender_uid)
+            if sender_num and current_key >= sender['_qq_latest']:
+                sender['qq_num'] = sender_num
+                sender['_qq_latest'] = current_key
+            if nickname and current_key >= sender['_nickname_latest']:
+                sender['nickname'] = nickname
+                sender['_nickname_latest'] = current_key
+            if card and current_key >= sender['_card_latest']:
+                sender['group_nickname'] = card
+                sender['_card_latest'] = current_key
+        return senders
+
+    def _get_group_member_rows(
+        self,
+        group_num: int,
+        uids: set[str],
+    ) -> dict[str, GroupMember]:
+        """分块批量查询群成员，避免超过 SQLite 参数数量限制。"""
+        result = {}
+        ordered_uids = sorted(uid for uid in uids if uid)
+        try:
+            for start in range(
+                0, len(ordered_uids), GROUP_MEMBER_QUERY_CHUNK_SIZE
+            ):
+                chunk = ordered_uids[
+                    start:start + GROUP_MEMBER_QUERY_CHUNK_SIZE
+                ]
+                rows = (
+                    self.dbman.session.query(GroupMember)
+                    .filter(GroupMember.group_number == group_num)
+                    .filter(GroupMember.uid.in_(chunk))
+                    .all()
+                )
+                result.update({
+                    str(member.uid): member
+                    for member in rows
+                    if member.uid
+                })
+        except SQLAlchemyError as exc:
+            logger.warning(
+                "读取群 %s 成员资料失败，使用消息行降级: %s",
+                group_num,
+                exc,
+            )
+        return result
+
+    @staticmethod
+    def _build_group_member(
+        platform_id: str,
+        member,
+        fallback: dict,
+        owner_uid: Optional[str],
+    ) -> ParsedMember:
+        qq_num = (
+            getattr(member, 'qq_num', None)
+            or fallback.get('qq_num')
+            or 0
+        )
+        nickname = (
+            getattr(member, 'nickname', None)
+            or fallback.get('nickname')
+            or str(qq_num or platform_id)
+        )
+        group_nickname = (
+            getattr(member, 'group_name_card', None)
+            or fallback.get('group_nickname')
+            or None
+        )
+        member_uid = str(getattr(member, 'uid', '') or platform_id)
+        return ParsedMember(
+            platform_id=member_uid,
+            qq_num=qq_num,
+            nickname=nickname,
+            group_nickname=group_nickname,
+            is_owner=bool(owner_uid and member_uid == str(owner_uid)),
+            is_admin=getattr(member, 'manager_flag', None) == 1,
+            avatar=(
+                fallback.get('avatar')
+                or public_user_avatar_url(qq_num)
+            ),
+        )
+
+    @staticmethod
+    def _enrich_with_self(
+        member: ParsedMember,
+        self_member: ParsedMember,
+    ) -> None:
+        """用当前账号资料补齐群成员降级值，不覆盖群内资料与角色。"""
+        fallback_names = {
+            '',
+            str(member.platform_id),
+            str(member.qq_num or ''),
+        }
+        if member.nickname in fallback_names and self_member.nickname:
+            member.nickname = self_member.nickname
+        if not member.qq_num and self_member.qq_num:
+            member.qq_num = self_member.qq_num
+        if not member.avatar:
+            member.avatar = self_member.avatar
+
+    def get_group_conversation_members(
+        self,
+        group_num: int,
+        query,
+        owner_uid: Optional[str] = None,
+    ) -> list[ParsedMember]:
+        """只解析本次导出的发送者，并额外保证群主和当前账号可关联。"""
+        sender_fallbacks = self._collect_group_senders(query)
+        self_member = self.get_self_member()
+        lookup_uids = {
+            fallback['lookup_uid']
+            for fallback in sender_fallbacks.values()
+            if fallback.get('lookup_uid')
+        }
+        if owner_uid:
+            lookup_uids.add(str(owner_uid))
+        if self_member:
+            lookup_uids.add(str(self_member.platform_id))
+        member_rows = self._get_group_member_rows(group_num, lookup_uids)
+
+        members: dict[str, ParsedMember] = {}
+        for platform_id, fallback in sender_fallbacks.items():
+            lookup_uid = fallback.get('lookup_uid')
+            member = self._build_group_member(
+                platform_id,
+                member_rows.get(lookup_uid) if lookup_uid else None,
+                fallback,
+                owner_uid,
+            )
+            members[member.platform_id] = member
+
+        if owner_uid:
+            owner_id = str(owner_uid)
+            if owner_id in members:
+                members[owner_id].is_owner = True
+            else:
+                members[owner_id] = self._build_group_member(
+                    owner_id, member_rows.get(owner_id), {}, owner_id
+                )
+
+        if self_member:
+            self_id = str(self_member.platform_id)
+            if self_id not in members:
+                members[self_id] = self._build_group_member(
+                    self_id,
+                    member_rows.get(self_id),
+                    {
+                        'qq_num': self_member.qq_num,
+                        'nickname': self_member.nickname,
+                        'group_nickname': self_member.group_nickname,
+                        'avatar': self_member.avatar,
+                    },
+                    owner_uid,
+                )
+            self._enrich_with_self(members[self_id], self_member)
+
+        return list(members.values())
+
     def get_all_group_members(self, group_num: int) -> list[ParsedMember]:
-        """获取群所有成员信息
+        """获取群成员表中的全部成员（兼容旧调用；导出不使用）。
 
         Args:
             group_num: 群号
@@ -368,8 +545,6 @@ class MessageParser:
         Returns:
             ParsedMember 列表
         """
-        from db.models import GroupMember
-
         members = (
             self.dbman.session.query(GroupMember)
             .filter(GroupMember.group_number == group_num)
@@ -378,10 +553,11 @@ class MessageParser:
             .all()
         )
 
+        owner_uid = self.dbman.group_owner_uid(group_num)
         result = []
         for member in members:
-            parsed = self._parse_group_member(member)
-            if parsed:
-                result.append(parsed)
+            result.append(self._build_group_member(
+                str(member.uid), member, {}, owner_uid
+            ))
 
         return result
