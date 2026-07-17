@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 
 from parser.models import ParsedMessage, ParsedMember, ElementType
 from .base import BaseExporter
+from .element_layout import element_layout
 
 
 logger = logging.getLogger(__name__)
@@ -1018,19 +1019,26 @@ class HTMLExporter(BaseExporter):
     ) -> str:
         """渲染消息内容（文本、图片、转发等）"""
         parts = []
+        inline_parts = []
+
+        def flush_inline_parts() -> None:
+            if inline_parts:
+                parts.append(
+                    f'<span class="inline-run">{"".join(inline_parts)}</span>'
+                )
+                inline_parts.clear()
 
         for elem in elements:
-            if elem.content.get('recovered_message_body'):
+            layout = element_layout(elem)
+            if layout is None:
                 continue
-            # 跳过 QUOTE 类型（引用消息已在外层处理）
-            if elem.type == ElementType.QUOTE:
-                continue
+            previous_part_count = len(parts)
 
             if elem.type == ElementType.TEXT:
                 text = html.escape(elem.content.get('text', ''))
                 # 简单换行处理
                 text = text.replace('\n', '<br>')
-                parts.append(f'<div class="text">{text}</div>')
+                parts.append(f'<span class="text">{text}</span>')
 
             elif elem.type == ElementType.IMAGE:
                 img_html = self._render_image(elem.content)
@@ -1089,7 +1097,7 @@ class HTMLExporter(BaseExporter):
 
             elif elem.type in (ElementType.MARKET_FACE, ElementType.BUBBLE_FACE):
                 text = elem.content.get('text') or elem.content.get('summary') or '[表情]'
-                parts.append(f'<div class="text">{html.escape(text)}</div>')
+                parts.append(f'<span class="text">{html.escape(text)}</span>')
 
             elif elem.type == ElementType.RED_PACKET:
                 prompt = html.escape(elem.content.get('prompt', ''))
@@ -1194,7 +1202,21 @@ class HTMLExporter(BaseExporter):
                     f'<div class="placeholder-card">{elem.type.name}</div>'
                 )
 
-        return ''.join(parts) if parts else '<div class="text">[空消息]</div>'
+            rendered = [
+                fragment for fragment in parts[previous_part_count:]
+                if fragment
+            ]
+            del parts[previous_part_count:]
+            if not rendered:
+                continue
+            if layout == 'inline':
+                inline_parts.extend(rendered)
+            else:
+                flush_inline_parts()
+                parts.extend(rendered)
+
+        flush_inline_parts()
+        return ''.join(parts) if parts else '<span class="text">[空消息]</span>'
 
     def _render_voice(self, content: dict) -> str:
         from parser.voice import voice_resource_key
@@ -1368,7 +1390,7 @@ class HTMLExporter(BaseExporter):
         """渲染图片"""
         image_sources = self._resolve_image_sources(content)
         if not image_sources:
-            return '<div class="text">[图片]</div>'
+            return '<span class="text">[图片]</span>'
         image_source = image_sources[0]
         path_attr = html.escape(image_source, quote=True)
         fallback_attr = self._image_fallback_attr(image_sources)
@@ -1559,23 +1581,69 @@ class HTMLExporter(BaseExporter):
                     parts.append(f"[按钮: {' | '.join(labels)}]")
         return ''.join(parts) or '[消息]'
 
+    def _render_quote_inline_element(self, element) -> str:
+        """渲染引用框中的单个行内元素，不生成嵌套按钮。"""
+        content = element.content
+        if element.type == ElementType.TEXT:
+            text = html.escape(str(content.get('text', '')))
+            return text.replace('\n', '<br>')
+        if element.type == ElementType.IMAGE:
+            image_sources = self._resolve_image_sources(content)
+            if not image_sources:
+                return '<span class="quote-media-label">[图片]</span>'
+            source = html.escape(image_sources[0], quote=True)
+            fallback_attr = self._image_fallback_attr(image_sources)
+            return (
+                '<span class="quote-inline-image">'
+                f'<img src="{source}" alt="引用图片" loading="lazy"'
+                f'{fallback_attr}></span>'
+            )
+        if element.type == ElementType.EMOJI:
+            from emojis import emoji_info
+
+            emoji_id = content.get('emoji_id')
+            label = str(content.get('text') or '[表情]')
+            info = emoji_info(emoji_id)
+            resource_id = info.resource_id if info else str(emoji_id)
+            glyph = content.get('unicode_glyph') or (
+                info.unicode_glyph if info else None
+            )
+            return self._system_emoji_markup(
+                resource_id, label, glyph, compact=True
+            )
+        if element.type == ElementType.MARKET_FACE:
+            text = content.get('text') or '[商城表情]'
+            return html.escape(str(text))
+        if element.type == ElementType.BUBBLE_FACE:
+            text = (
+                content.get('text')
+                or content.get('summary')
+                or content.get('emoji_text')
+                or '[表情]'
+            )
+            return html.escape(str(text))
+        return ''
+
     def _render_quote_preview(self, elements: list) -> str:
         """渲染引用框预览，优先展示 40900 补全出的真实媒体。"""
+        visible_elements = [
+            element for element in elements
+            if element_layout(element) is not None
+        ]
+        if visible_elements and all(
+            element_layout(element) == 'inline'
+            for element in visible_elements
+        ):
+            inline = ''.join(
+                self._render_quote_inline_element(element)
+                for element in visible_elements
+            )
+            if inline:
+                return f'<span class="quote-inline-run">{inline}</span>'
+
         for element in elements:
-            if element.type == ElementType.QUOTE:
+            if element_layout(element) != 'block':
                 continue
-            if element.type == ElementType.IMAGE:
-                image_sources = self._resolve_image_sources(element.content)
-                if image_sources:
-                    image_source = image_sources[0]
-                    source = html.escape(image_source, quote=True)
-                    fallback_attr = self._image_fallback_attr(image_sources)
-                    return (
-                        '<div class="quote-media">'
-                        f'<img src="{source}" class="message-image" '
-                        f'alt="引用图片" loading="lazy"{fallback_attr}></div>'
-                    )
-                return '<span class="quote-media-label">[图片]</span>'
             if element.type == ElementType.VIDEO:
                 return '<span class="quote-media-label">[视频]</span>'
             if element.type == ElementType.VOICE:
@@ -1583,9 +1651,6 @@ class HTMLExporter(BaseExporter):
             if element.type in (ElementType.FILE, ElementType.ONLINE_FILE):
                 filename = html.escape(element.content.get('filename') or '')
                 return f'<span class="quote-media-label">[文件] {filename}</span>'
-            if element.type == ElementType.MARKET_FACE:
-                label = html.escape(element.content.get('text') or '[商城表情]')
-                return f'<span class="quote-media-label">{label}</span>'
 
         preview = self._extract_text_content(elements) if elements else ''
         preview = preview[:50] + ('...' if len(preview) > 50 else '')
@@ -2087,6 +2152,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 13px;
         }}
 
+        .inline-run {{
+            word-break: break-word;
+        }}
+
         .text {{
             word-break: break-word;
         }}
@@ -2134,6 +2203,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         .quote-content {{
             opacity: 0.9;
+        }}
+
+        .quote-inline-run {{
+            word-break: break-word;
+        }}
+
+        .quote-inline-image {{
+            display: inline-block;
+            max-width: 150px;
+            max-height: 96px;
+            vertical-align: bottom;
+        }}
+
+        .quote-inline-image img {{
+            display: block;
+            max-width: 100%;
+            max-height: 96px;
+            border-radius: 6px;
         }}
 
         .quote-media .image-button {{
@@ -2685,9 +2772,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             clip-path: polygon(0 0, 100% 0, 0 100%);
         }}
 
-        .text + .text {{ margin-top: 5px; }}
         .image-button {{
-            display: block;
+            display: inline-block;
             max-width: 100%;
             margin: 2px 0;
             padding: 0;
@@ -2696,6 +2782,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 10px;
             background: transparent;
             cursor: zoom-in;
+            vertical-align: bottom;
         }}
         .message-image {{
             width: auto;

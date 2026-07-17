@@ -12,6 +12,7 @@ from typing import Any, Optional
 from parser.models import ParsedMessage, ParsedMember, ElementType
 from parser.avatar import find_local_avatar, image_data_url
 from .base import BaseExporter
+from .element_layout import element_layout, join_content_fragments
 
 
 logger = logging.getLogger(__name__)
@@ -296,10 +297,13 @@ class ChatLabJSONExporter(BaseExporter):
 
         member_map = member_map or {}
         parts = []
+        layouts = []
 
         for elem in elements:
-            if elem.content.get('recovered_message_body'):
+            layout = element_layout(elem)
+            if layout is None:
                 continue
+            previous_part_count = len(parts)
             if elem.type == ElementType.TEXT:
                 parts.append(elem.content.get('text', ''))
 
@@ -417,7 +421,11 @@ class ChatLabJSONExporter(BaseExporter):
             else:
                 parts.append("[未知消息]")
 
-        content = '\n'.join(parts)
+            layouts.extend(
+                [layout] * (len(parts) - previous_part_count)
+            )
+
+        content = join_content_fragments(zip(layouts, parts))
         return content if content else None
 
     def _format_image(self, c: dict[str, Any]) -> Optional[str]:
