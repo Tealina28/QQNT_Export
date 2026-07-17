@@ -1,15 +1,30 @@
 from collections import defaultdict
+from dataclasses import dataclass
 import logging
 
-from sqlalchemy import and_, create_engine, inspect, literal, or_
+from sqlalchemy import and_, create_engine, inspect, literal, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.query import Query
 
-__all__ = ["DatabaseManager"]
+__all__ = ["DatabaseManager", "GroupInfo"]
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GroupInfo:
+    """从群详情与群列表逐字段合并后的导出资料。"""
+
+    group_number: int | str
+    name: str | None = None
+    remark: str | None = None
+    owner_uid: str | None = None
+
+    @property
+    def display_name(self) -> str:
+        return self.remark or self.name or str(self.group_number)
 
 
 class DatabaseManager:
@@ -421,36 +436,109 @@ class DatabaseManager:
         model = self._models["profile_info"]["profile_info_v6"]
         return self.session.query(model).filter_by(uid = uid).first()
 
-    def group_info(self, group_num):
-        model = self._models["group_info"]["group_list"]
-        return self.session.query(model) \
-            .filter_by(group_number = group_num) \
-            .first()
-
-    def group_owner_uid(self, group_num) -> str | None:
-        """从群详情读取群主 UID；旧库缺表或缺列时正常降级。"""
-        model = self._models["group_info"]["group_detail_info_ver1"]
-        engine = self._engines.get("group_info")
-        if not engine:
+    @staticmethod
+    def _nonempty_group_value(value):
+        if value is None:
             return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    def _group_info_fields(self, engine, inspector, model, group_num, fields):
+        """只投影表中实际存在的群资料列，兼容旧版残缺表结构。"""
+        table_name = model.__tablename__
         try:
-            inspector = inspect(engine)
-            if not inspector.has_table(model.__tablename__):
-                return None
+            if not inspector.has_table(table_name):
+                return {}
             columns = {
                 column["name"]
-                for column in inspector.get_columns(model.__tablename__)
+                for column in inspector.get_columns(table_name)
             }
-            if not {"60001", "60002"} <= columns:
-                return None
-            owner_uid = (
-                self.session.query(model.owner_uid)
-                .filter(model.group_number == group_num)
-                .scalar()
+            if "60001" not in columns:
+                return {}
+            selected_fields = [
+                field
+                for field in fields
+                if getattr(model, field).property.columns[0].name in columns
+            ]
+            if not selected_fields:
+                return {}
+            statement = (
+                select(*(
+                    getattr(model, field).label(field)
+                    for field in selected_fields
+                ))
+                .where(model.group_number == group_num)
+                .limit(1)
             )
+            with engine.connect() as connection:
+                row = connection.execute(statement).mappings().first()
         except SQLAlchemyError as exc:
-            logger.warning("读取群主 UID 失败，按普通成员导出: %s", exc)
-            return None
-        return str(owner_uid) if owner_uid else None
+            logger.warning(
+                "读取群 %s 的 %s 资料失败，跳过该表: %s",
+                group_num,
+                table_name,
+                exc,
+            )
+            return {}
+        return dict(row) if row else {}
+
+    def group_info(self, group_num) -> GroupInfo:
+        """合并群详情与群列表；详情字段非空时优先。"""
+        normalized_group_num = self._normalize_group_number(group_num)
+        engine = self._engines.get("group_info")
+        if not engine:
+            return GroupInfo(group_number=normalized_group_num)
+
+        try:
+            inspector = inspect(engine)
+        except SQLAlchemyError as exc:
+            logger.warning(
+                "检查群 %s 的资料库失败，使用群号降级: %s",
+                normalized_group_num,
+                exc,
+            )
+            return GroupInfo(group_number=normalized_group_num)
+
+        detail_model = self._models["group_info"][
+            "group_detail_info_ver1"
+        ]
+        list_model = self._models["group_info"]["group_list"]
+        detail = self._group_info_fields(
+            engine,
+            inspector,
+            detail_model,
+            normalized_group_num,
+            ("name", "remark", "owner_uid"),
+        )
+        group_list = self._group_info_fields(
+            engine,
+            inspector,
+            list_model,
+            normalized_group_num,
+            ("name", "remark"),
+        )
+
+        def merged(field):
+            detail_value = self._nonempty_group_value(detail.get(field))
+            if detail_value is not None:
+                return detail_value
+            return self._nonempty_group_value(group_list.get(field))
+
+        name = merged("name")
+        remark = merged("remark")
+        owner_uid = self._nonempty_group_value(detail.get("owner_uid"))
+        return GroupInfo(
+            group_number=normalized_group_num,
+            name=str(name) if name is not None else None,
+            remark=str(remark) if remark is not None else None,
+            owner_uid=(
+                str(owner_uid) if owner_uid is not None else None
+            ),
+        )
+
+    def group_owner_uid(self, group_num) -> str | None:
+        """兼容旧调用，群主 UID 与合并后的群资料保持一致。"""
+        return self.group_info(group_num).owner_uid
 
 from .models import *

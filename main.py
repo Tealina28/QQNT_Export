@@ -292,17 +292,13 @@ def export_group_conversation(
     """
     # 获取群信息
     group_info = dbman.group_info(group_num)
-    if group_info:
-        conversation_name = group_info.remark or group_info.name or str(group_num)
-        group_id = str(group_num)
-    else:
-        conversation_name = str(group_num)
-        group_id = str(group_num)
+    conversation_name = group_info.display_name
+    group_id = str(group_num)
 
     logging.info(f"开始导出群聊: {conversation_name}")
 
     # 只收集本次实际发送者，并补入群主和当前账号。
-    owner_uid = dbman.group_owner_uid(group_num)
+    owner_uid = group_info.owner_uid
     members = parser.get_group_conversation_members(
         group_num, query, owner_uid
     )

@@ -1,1 +1,1 @@
-from .man import DatabaseManager
+from .man import DatabaseManager, GroupInfo
