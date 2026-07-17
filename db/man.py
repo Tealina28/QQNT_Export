@@ -1,7 +1,7 @@
 from collections import defaultdict
 import logging
 
-from sqlalchemy import create_engine, inspect, literal, or_
+from sqlalchemy import and_, create_engine, inspect, literal, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.query import Query
@@ -65,20 +65,196 @@ class DatabaseManager:
         ))
 
     def c2c_messages(self, filters):
+        """按索引列 40027 分区私聊，旧库空分区回退到 40021/40030。"""
         model = self._models["nt_msg"]["c2c_msg_table"]
+        mapping_model = self._models["nt_msg"]["nt_uid_mapping_table"]
         query = self._message_query(model)
+
         if filters:
-            uids = [self.num_to_uid(num) for num in filters]
+            mappings = (
+                self.session.query(mapping_model)
+                .filter(mapping_model.qq_num.in_(filters))
+                .order_by(mapping_model.id)
+                .all()
+            )
+            mapped_numbers = {
+                str(mapping.qq_num)
+                for mapping in mappings
+            }
+            for value in filters:
+                if str(value) not in mapped_numbers:
+                    # 保持既有的无效过滤值失败行为；前置校验属于 P2-4。
+                    self.num_to_uid(value)
+            requested_sort_nos = {mapping.id for mapping in mappings}
         else:
-            uids = [
-                row[0] for row in query.with_entities(
-                    model.interlocutor_uid
-                ).distinct().all()
-            ]
+            mappings = []
+            requested_sort_nos = None
 
-        queries = {uid: query.filter_by(interlocutor_uid = uid).order_by(model.time) for uid in uids}
+        partition_query = (
+            query.order_by(None)
+            .filter(model.UNK_10.is_not(None))
+        )
+        if requested_sort_nos is not None:
+            partition_query = partition_query.filter(
+                model.UNK_10.in_(requested_sort_nos)
+            )
+        partition_rows = (
+            partition_query
+            .with_entities(
+                model.UNK_10,
+                model.interlocutor_uid,
+                model.interlocutor_num,
+            )
+            .distinct()
+            .all()
+        )
+        sort_nos = {row[0] for row in partition_rows}
+        if not filters:
+            mappings = (
+                self.session.query(mapping_model)
+                .filter(mapping_model.id.in_(sort_nos))
+                .all()
+            )
+        mapping_by_sort_no = {
+            mapping.id: mapping
+            for mapping in mappings
+        }
 
+        candidates_by_sort_no = defaultdict(list)
+        for sort_no, uid, qq_num in partition_rows:
+            candidates_by_sort_no[sort_no].append(
+                (uid, qq_num)
+            )
+
+        partition_conditions = defaultdict(list)
+        identity_keys = defaultdict(set)
+        number_keys = defaultdict(set)
+        for sort_no in sorted(sort_nos):
+            mapping = mapping_by_sort_no.get(sort_no)
+            candidates = candidates_by_sort_no[sort_no]
+            actual_uids = sorted({
+                str(candidate[0])
+                for candidate in candidates
+                if candidate[0]
+            })
+            sort_keys = set()
+            keys_by_number = defaultdict(set)
+            for uid in actual_uids:
+                key = uid
+                sort_keys.add(key)
+                identity_keys[uid].add(key)
+                partition_conditions[key].append(and_(
+                    model.UNK_10 == sort_no,
+                    model.interlocutor_uid == uid,
+                ))
+                for candidate_uid, qq_num in candidates:
+                    if str(candidate_uid or '') != uid or not qq_num:
+                        continue
+                    keys_by_number[str(qq_num)].add(key)
+                    number_keys[str(qq_num)].add(key)
+
+            for candidate_uid, qq_num in candidates:
+                if candidate_uid:
+                    continue
+                matching_keys = (
+                    keys_by_number.get(str(qq_num), set())
+                    if qq_num else set()
+                )
+                mapping_key = (
+                    (mapping.uid or mapping.UNK_02)
+                    if mapping and (mapping.uid or mapping.UNK_02)
+                    else None
+                )
+                if not actual_uids and mapping_key:
+                    key = str(mapping_key)
+                elif len(matching_keys) == 1:
+                    key = next(iter(matching_keys))
+                elif qq_num:
+                    key = f'c2c-sort-{sort_no}-qq-{qq_num}'
+                else:
+                    missing_kind = 'null' if candidate_uid is None else 'empty'
+                    key = f'c2c-sort-{sort_no}-{missing_kind}-uid'
+                sort_keys.add(key)
+                partition_conditions[key].append(and_(
+                    model.UNK_10 == sort_no,
+                    model.interlocutor_uid == candidate_uid,
+                    model.interlocutor_num == qq_num,
+                ))
+                if qq_num:
+                    number_keys[str(qq_num)].add(key)
+
+            for identity in (
+                mapping.uid if mapping else None,
+                mapping.UNK_02 if mapping else None,
+            ):
+                if not identity:
+                    continue
+                identity = str(identity)
+                if identity in sort_keys:
+                    identity_keys[identity].add(identity)
+                elif len(sort_keys) == 1:
+                    identity_keys[identity].update(sort_keys)
+            if mapping and mapping.qq_num:
+                number_keys[str(mapping.qq_num)].update(sort_keys)
+
+        fallback_rows = (
+            query.order_by(None)
+            .filter(model.UNK_10.is_(None))
+            .with_entities(model.interlocutor_uid, model.interlocutor_num)
+            .distinct()
+            .all()
+        )
+        requested_numbers = {
+            str(value) for value in filters
+        } if filters else None
+        selected_identities = set(identity_keys)
+        if filters:
+            selected_identities.update(
+                str(identity)
+                for mapping in mappings
+                for identity in (mapping.uid, mapping.UNK_02)
+                if identity
+            )
+        for uid, qq_num in fallback_rows:
+            if (
+                filters
+                and str(qq_num) not in requested_numbers
+                and str(uid) not in selected_identities
+            ):
+                continue
+            if uid:
+                matching_keys = identity_keys.get(str(uid), set())
+            else:
+                matching_keys = set()
+            if not uid and qq_num:
+                matching_keys = number_keys.get(str(qq_num), set())
+            if len(matching_keys) == 1:
+                key = next(iter(matching_keys))
+            elif uid:
+                key = str(uid)
+            elif qq_num:
+                key = f'c2c-qq-{qq_num}'
+            else:
+                key = self._c2c_fallback_key(uid)
+            partition_conditions[key].append(and_(
+                model.UNK_10.is_(None),
+                model.interlocutor_uid == uid,
+                model.interlocutor_num == qq_num,
+            ))
+
+        queries = {
+            key: query.filter(or_(*conditions)).order_by(model.time)
+            for key, conditions in partition_conditions.items()
+        }
         return queries
+
+    @staticmethod
+    def _c2c_fallback_key(uid):
+        if uid is None:
+            return 'c2c-null-uid'
+        if uid == '':
+            return 'c2c-empty-uid'
+        return uid
 
     def dataline_messages(self):
         """按设备会话读取数据线消息；旧版数据库无此表时返回空。"""
@@ -172,16 +348,74 @@ class DatabaseManager:
         }
 
     def group_messages(self, filters):
+        """按群号索引 40027 分区，精确合并旧记录的空分区行。"""
         model = self._models["nt_msg"]["group_msg_table"]
         query = self._message_query(model)
-        if not filters:
-            filters = [
-                row[0] for row in query.with_entities(
-                    model.mixed_group_num
-                ).distinct().all()
+
+        if filters:
+            group_numbers = list(dict.fromkeys(
+                self._normalize_group_number(value)
+                for value in filters
+            ))
+        else:
+            group_numbers = [
+                self._normalize_group_number(row[0])
+                for row in (
+                    query.order_by(None)
+                    .filter(model.group_num2.is_not(None))
+                    .with_entities(model.group_num2)
+                    .distinct()
+                    .all()
+                )
             ]
-        queries = {num: query.filter_by(mixed_group_num = num).order_by(model.time) for num in filters}
+        indexed_group_numbers = set(group_numbers)
+
+        fallback_conditions = defaultdict(list)
+        fallback_rows = (
+            query.order_by(None)
+            .filter(model.group_num2.is_(None))
+            .with_entities(model.group_num, model.group_num3)
+            .distinct()
+            .all()
+        )
+        for group_num, group_num3 in fallback_rows:
+            if group_num not in (None, ''):
+                key = self._normalize_group_number(group_num)
+                condition = and_(
+                    model.group_num2.is_(None),
+                    model.group_num == group_num,
+                )
+            else:
+                key = self._normalize_group_number(group_num3)
+                condition = and_(
+                    model.group_num2.is_(None),
+                    model.group_num == group_num,
+                    model.group_num3 == group_num3,
+                )
+            fallback_conditions[key].append(condition)
+            if not filters and key not in group_numbers:
+                group_numbers.append(key)
+
+        queries = {}
+        for group_num in group_numbers:
+            conditions = []
+            if filters or group_num in indexed_group_numbers:
+                conditions.append(model.group_num2 == group_num)
+            conditions.extend(fallback_conditions.get(group_num, []))
+            queries[group_num] = (
+                query.filter(or_(*conditions))
+                .order_by(model.seq)
+            )
         return queries
+
+    @staticmethod
+    def _normalize_group_number(value):
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return value
+        return value
 
     def profile_info(self, uid):
         model = self._models["profile_info"]["profile_info_v6"]

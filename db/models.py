@@ -118,7 +118,7 @@ class C2cMessage(Base, Message):
 
     interlocutor_uid: Mapped[str] = mapped_column("40021", String(24),
                                                   ForeignKey("nt_uid_mapping_table.48902"))  # Tencent internal UID
-    UNK_10: Mapped[int] = mapped_column("40027")  # group num
+    UNK_10: Mapped[int] = mapped_column("40027")  # indexed peer sort number
     UNK_15: Mapped[str] = mapped_column("40090", Text)  # group name card
     UNK_23: Mapped[int] = mapped_column("40100")  # @ status
     UNK_25: Mapped[int] = mapped_column("40060")
