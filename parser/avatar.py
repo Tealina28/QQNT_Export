@@ -5,12 +5,51 @@ from __future__ import annotations
 import base64
 import hashlib
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 def public_user_avatar_url(qq_num: int) -> str | None:
     if not qq_num:
         return None
     return f"https://q1.qlogo.cn/g?b=qq&nk={qq_num}&s=100"
+
+
+def normalize_user_avatar_url(
+    avatar_url: str | None,
+    qq_num: int,
+) -> str | None:
+    """规范化 QQ 用户头像地址，地址缺失或无效时生成公共地址。"""
+    fallback = public_user_avatar_url(qq_num)
+    if not avatar_url:
+        return fallback
+
+    value = avatar_url.strip()
+    if not value:
+        return fallback
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return fallback
+
+    hostname = (parsed.hostname or '').lower()
+    is_qlogo = hostname == 'qlogo.cn' or hostname.endswith('.qlogo.cn')
+    if not is_qlogo:
+        return value
+    if parsed.scheme not in ('', 'http', 'https'):
+        return fallback
+
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    sizes = [item_value for key, item_value in query if key == 's']
+    size = next((item_value for item_value in sizes if item_value), '100')
+    query = [(key, item_value) for key, item_value in query if key != 's']
+    query.append(('s', size))
+    return urlunsplit((
+        'https',
+        parsed.netloc,
+        parsed.path,
+        urlencode(query),
+        parsed.fragment,
+    ))
 
 
 def public_group_avatar_url(group_num: int | str) -> str | None:
