@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from db import DatabaseManager
 from parser import MessageParser
+from parser.references import ConversationReferenceResolver
 from parser.dataline import (
     dataline_conversation_name,
     resolve_dataline_owner_id,
@@ -113,10 +114,18 @@ def create_output_dirs(
     return c2c_path, group_path, dataline_path
 
 
-def iter_parsed_messages(query, parse_message, batch_size: int):
+def iter_parsed_messages(
+    query,
+    parse_message,
+    batch_size: int,
+    conversation_name: str = '',
+):
     """分批读取 ORM 行并逐条解析，避免整个会话常驻内存。"""
-    for row in query.yield_per(batch_size):
-        yield parse_message(row)
+    with ConversationReferenceResolver(
+        query, conversation_name, batch_size
+    ) as reference_resolver:
+        for row in query.yield_per(batch_size):
+            yield reference_resolver.resolve(parse_message(row))
 
 
 def export_query(
@@ -170,7 +179,9 @@ def export_query(
             started_exporters.append(exporter)
             exporter.start_stream(meta, members)
         if incremental_exporters or buffered_exporters:
-            for message in iter_parsed_messages(query, parse_message, batch_size):
+            for message in iter_parsed_messages(
+                query, parse_message, batch_size, output_name
+            ):
                 for exporter, _ in incremental_exporters:
                     exporter.write_message(message)
                 if materialized_messages is not None:
@@ -188,7 +199,9 @@ def export_query(
         logging.info(f"  导出完成: {output_path.name}")
 
     for exporter, output_path in legacy_streaming_exporters:
-        messages = iter_parsed_messages(query, parse_message, batch_size)
+        messages = iter_parsed_messages(
+            query, parse_message, batch_size, output_name
+        )
         exporter.export(meta, members, messages)
         logging.info(f"  导出完成: {output_path.name}")
 

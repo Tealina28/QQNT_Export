@@ -896,7 +896,10 @@ class HTMLExporter(BaseExporter):
         )
         quote_content = quote_element.content if quote_element else {}
         quote_keys: list[object] = []
-        direct_id = quote_content.get('orig_msg_id_ref')
+        direct_id = (
+            quote_content.get('orig_msg_id_ref')
+            or quote_content.get('resolved_msg_id')
+        )
         if direct_id:
             quote_keys.append(('id', str(direct_id)))
         elif quote_element is None and msg.quoted_msg_id:
@@ -939,7 +942,10 @@ class HTMLExporter(BaseExporter):
                     f'<div class="quote-sender">{html.escape(quoted_sender_name)}</div>'
                     if quoted_sender_name else ''
                 )
-                target_id = quote_content.get('orig_msg_id_ref')
+                target_id = (
+                    quote_content.get('orig_msg_id_ref')
+                    or quote_content.get('resolved_msg_id')
+                )
                 if quote_element is None:
                     target_id = target_id or msg.quoted_msg_id
                 target_seq = (
