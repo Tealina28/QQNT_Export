@@ -18,6 +18,7 @@
 - **跨设备消息**：导出 `dataline_msg_table` 中“我的手机/电脑/平板”同步记录
 - **QQ 系统表情**：读取可选的 `emoji.db`，HTML 优先显示 APNG、静态图并最终回退文字
 - **语音播放**：兼容标准、扁平 MD5 和旧式 PTT 缓存，解码 QQ SILK 为 WAV 供 HTML 播放
+- **可选批量解密**：批量解密用户已提取的 Android QQNT 数据库（`gpro` 除外）
 
 ## 📦 导出格式
 
@@ -49,6 +50,9 @@ source venv/bin/activate  # Linux/Mac
 # 或 Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
+# 如需解密 Android QQNT 加密数据库，再安装可选依赖
+pip install -r requirements-decrypt.txt
+
 # 3. 配置并运行
 cp example.toml my_config.toml
 # 编辑 my_config.toml
@@ -60,7 +64,7 @@ python main.py my_config.toml
 创建或编辑 `.toml` 配置文件：
 
 ```toml
-db_path = "./databases/"  # 解密后的数据库目录
+db_path = "./databases/"  # 明文目录；启用 decrypt 时为 Android 加密库目录
 pic_path = "./chatpic/"   # chatpic目录（可选）
 output_path = ""          # 导出路径（默认为 databases/../output）
 
@@ -78,6 +82,13 @@ emoji_path = ""         # 可选：nt_data 或 EmojiSystermResource 目录
 ptt_path = ""           # 可选：nt_data 或 Ptt 目录
 silk_transcode = true   # HTML 将 QQ SILK/.amr 解码为 WAV
 embed_avatars = false   # ChatLab 是否嵌入本地头像 Data URL
+
+[decrypt]
+enabled = false
+backend = "android_qqnt"
+uid = ""                       # Android QUID
+output_path = "./decrypted/"  # 持久明文数据库目录
+overwrite = false
 ```
 
 导出结果分别写入 `output/c2c/`、`output/group/` 和
@@ -91,7 +102,8 @@ ChatLab 的 `ownerId` 以及 HTML 中消息的收发方向。
 QQNT_Export/
 ├── db/                   # 数据库层
 │   ├── models.py         # SQLAlchemy 模型
-│   └── man.py            # DatabaseManager
+│   ├── man.py            # DatabaseManager
+│   └── decryption.py     # 可选的 Android QQNT 批量解密
 ├── parser/               # 解析层（新）
 │   ├── models.py         # 数据模型
 │   ├── avatar.py         # 头像 URL 与本地缓存解析
@@ -156,10 +168,31 @@ QQNT_Export/
 
 ## 🔧 数据库解密
 
-本项目仅处理**已解密**的数据库。解密工具：
+项目可在导出前解密用户已经合法提取的 **Android NT QQ** 数据库目录。
+该功能不负责 root、ADB、备份提取或 Windows QQNT 密钥获取。
 
-- **Android**: [qqnt_backup](https://github.com/xCipHanD/qqnt_backup)
-- **Windows**: 参考 [qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)
+1. 安装可选依赖：`pip install -r requirements-decrypt.txt`。
+2. 完全退出 QQ 后复制账号的 `nt_qq_<hash>` 数据库目录。
+3. 将 `db_path` 指向该加密目录，并在配置中启用 `[decrypt]`、填写
+   QUID 与独立的明文 `output_path`。
+
+解密会遍历输入目录顶层的 `*.db`，不按本项目当前使用的数据库做白名单
+筛选；已知不兼容的 `gpro_v1-6_u_*.db` 及上游遗留
+`en_gpro_v1-6_u_*.db` 会被显式跳过。其余数据库先写入同目录下的私有
+staging；只有全部成功后才发布明文目录，任一失败则整批失败。源文件不会
+被修改。
+
+为避免静默丢失未 checkpoint 的最新数据，输入目录存在非空
+`*.db-wal` 或 `*.db-journal` 时会直接拒绝处理。明文数据库包含完整聊天
+资料，请妥善保管；默认不会在导出后自动删除。`overwrite = true` 也只能
+替换带有本工具有效清单且文件集合完全匹配的旧解密目录，不会删除任意目录。
+
+参考实现明确标注暂不支持解密 `gpro_v1-6_u_*.db`，因此当前输出不包含
+该数据库。其余数据库仍需用对应 QQ 版本的原始加密目录验证兼容性。
+
+目前内置的密钥派生方式只适用于 Android。Windows 数据库仍需先通过其他
+方式取得密钥或完成解密，例如参考
+[qq-win-db-key](https://github.com/QQBackup/qq-win-db-key)。
 
 ## 🛠️ 开发指南
 

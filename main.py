@@ -114,6 +114,78 @@ def create_output_dirs(
     return c2c_path, group_path, dataline_path
 
 
+def prepare_runtime_config(
+    config: dict,
+    source_db_path: Path,
+    export_output_path: Path,
+) -> dict:
+    """按需解密数据库，并返回供本次导出使用的配置副本。"""
+    runtime_config = dict(config)
+    decrypt_config = config.get('decrypt')
+    if decrypt_config is None:
+        return runtime_config
+    if not isinstance(decrypt_config, dict):
+        raise ValueError('decrypt 必须是 TOML 配置表')
+
+    enabled = decrypt_config.get('enabled', False)
+    if not isinstance(enabled, bool):
+        raise ValueError('decrypt.enabled 必须是布尔值')
+    if not enabled:
+        return runtime_config
+
+    backend = decrypt_config.get('backend', 'android_qqnt')
+    if backend != 'android_qqnt':
+        raise ValueError(
+            f'不支持的解密后端: {backend!r}；目前仅支持 android_qqnt'
+        )
+
+    plaintext_output = decrypt_config.get('output_path')
+    if plaintext_output is None or (
+        isinstance(plaintext_output, str) and not plaintext_output.strip()
+    ):
+        raise ValueError('启用解密时必须配置 decrypt.output_path')
+
+    uid = decrypt_config.get('uid')
+    if not isinstance(uid, str) or not uid.strip():
+        raise ValueError('启用解密时必须配置非空的 decrypt.uid')
+
+    overwrite = decrypt_config.get('overwrite', False)
+    if not isinstance(overwrite, bool):
+        raise ValueError('decrypt.overwrite 必须是布尔值')
+
+    # 仅在显式启用解密时加载可选的 SQLCipher 解密实现，避免影响
+    # 继续使用明文 SQLite 数据库的现有配置。
+    from db.decryption import decrypt_database_directory
+
+    plaintext_output = Path(plaintext_output)
+    source_resolved = source_db_path.expanduser().resolve(strict=False)
+    plaintext_resolved = plaintext_output.expanduser().resolve(strict=False)
+    export_resolved = export_output_path.expanduser().resolve(strict=False)
+    if (
+        source_resolved == export_resolved
+        or source_resolved in export_resolved.parents
+        or export_resolved in source_resolved.parents
+    ):
+        raise ValueError('加密 db_path 与导出 output_path 不能互相包含')
+    if (
+        plaintext_resolved == export_resolved
+        or plaintext_resolved in export_resolved.parents
+        or export_resolved in plaintext_resolved.parents
+    ):
+        raise ValueError('decrypt.output_path 与导出 output_path 不能互相包含')
+
+    logging.info('开始解密数据库目录: %s', source_db_path)
+    decrypted_db_path = decrypt_database_directory(
+        source_path=source_db_path,
+        output_path=plaintext_output,
+        uid=uid,
+        overwrite=overwrite,
+    )
+    logging.info('数据库解密完成: %s', decrypted_db_path)
+    runtime_config['db_path'] = str(decrypted_db_path)
+    return runtime_config
+
+
 def iter_parsed_messages(
     query,
     parse_message,
@@ -371,14 +443,23 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    # 数据库路径
-    db_path = Path(config["db_path"])
+    # 原始数据库路径。启用解密时它是加密库目录；默认导出路径仍
+    # 必须据此计算，不能跟随运行时明文目录改变。
+    source_db_path = Path(config["db_path"])
 
     # 输出路径
     if not config.get("output_path"):
-        output_path = db_path.parent / "output"
+        output_path = source_db_path.parent / "output"
     else:
         output_path = Path(config["output_path"])
+
+    try:
+        config = prepare_runtime_config(config, source_db_path, output_path)
+    except Exception as exc:
+        logging.error('数据库解密失败: %s', exc)
+        raise SystemExit(1) from exc
+
+    db_path = Path(config["db_path"])
 
     configured_types = config.get(
         'conversation_types', ['c2c', 'group', 'dataline']

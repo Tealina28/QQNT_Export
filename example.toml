@@ -1,4 +1,4 @@
-db_path = ".\\databases\\" # 解密后的数据库目录路径
+db_path = ".\\databases\\" # 明文数据库目录；启用下方 decrypt 时改为 Android 加密库目录
 pic_path = ".\\chatpic\\" # chatpic目录路径，留空则不导出图片资源
 
 output_path = "" # 导出的路径，留空默认为数据库上级目录
@@ -37,3 +37,15 @@ silk_transcode = true
 # 以下媒体类型暂未接入本地资源落地
 # video_path = ""         # 视频缓存目录（待提供后激活视频落地）
 # file_path = ""          # 文件缓存目录（待提供后激活文件落地）
+
+# ============================================================================
+# Android QQNT 数据库批量解密（可选，gpro 除外）
+# ============================================================================
+# 启用后处理 db_path 顶层除 gpro 外的 *.db；任一数据库失败则整批不发布。
+# 请在 QQ 完全退出后复制数据库目录；检测到非空 WAL/回滚日志时会拒绝。
+[decrypt]
+enabled = false
+backend = "android_qqnt"
+uid = "" # Android QQ files/uid 目录中“QQ号###”后的 QUID
+output_path = ".\\decrypted_databases\\" # 持久明文目录，不能与 db_path 相同
+overwrite = false # 仅可替换带本工具有效清单的旧明文目录
