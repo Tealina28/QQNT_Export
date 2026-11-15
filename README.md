@@ -248,6 +248,8 @@ class MyExporter(BaseExporter):
 | [nt_msg.py](https://github.com/BrokenC1oud/nt_msg.py) | SQLAlchemy模型, DatabaseManager |
 | [qq-dump](https://github.com/miniyu157/qq-dump) | Protobuf 字段映射参考（撤回、互动表情、Ark 卡片等消息语义） |
 | [QQNT-Database-Export-Tool](https://github.com/star-picker/QQNT-Database-Export-Tool) | 消息元素解析逻辑参考 |
+| [webark-im-template](https://github.com/dogxii/webark-im-template) | Ark 消息模板与渲染实现参考 |
+| [WeQ](https://github.com/weq-devs/WeQ) | QQNT 数据库、Protobuf 与消息元素实现参考 |
 | [ChatLab](https://github.com/ChatLab/ChatLab) | 标准化聊天数据交换格式 |
 
 ## 💬 讨论与贡献
